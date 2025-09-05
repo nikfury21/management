@@ -4,8 +4,9 @@ FROM python:3.10-slim
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies (ffmpeg, fonts, playwright deps)
+# Install system dependencies (added git)
 RUN apt-get update && apt-get install -y \
+    git \
     ffmpeg \
     wget \
     curl \
@@ -28,10 +29,10 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first (for caching)
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip (avoids old pip bugs) and install Python dependencies
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Ensure playwright chromium is installed
+# Install Playwright Chromium with dependencies
 RUN playwright install --with-deps chromium
 
 # Copy the rest of the code
