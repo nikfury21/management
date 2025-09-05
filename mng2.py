@@ -4233,16 +4233,19 @@ async def block_unfree_media(client, message):
 load_lock_state()
 
 
-# === Render-friendly entrypoint (fixed) ===
+# === Render-friendly entrypoint (full replacement) ===
 import os
 import threading
 import asyncio
 import traceback
 from flask import Flask
+from pyrogram import Client
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    CallbackQueryHandler, filters as ptb_filters
+)
 
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters as ptb_filters
-
-# === Flask app for keep-alive ===
+# === Flask keep-alive ===
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
@@ -4270,7 +4273,7 @@ async def start_bots():
         # --- PTB Application ---
         application = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).build()
 
-        # --- Register handlers ---
+        # === Register handlers (all your existing handlers) ===
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("info", info))
@@ -4343,7 +4346,7 @@ async def start_bots():
         application.add_handler(CommandHandler("character", character_command))
         application.add_handler(CallbackQueryHandler(character_callback, pattern="^char_"))
 
-        # --- Periodic tasks ---
+        # === Periodic tasks ===
         application.job_queue.run_repeating(
             lambda ctx: asyncio.create_task(unmute_expired_task(application)),
             interval=5,
@@ -4358,13 +4361,11 @@ async def start_bots():
         traceback.print_exc()
 
 if __name__ == "__main__":
-    # Start Flask keep-alive in a separate thread
+    # 1️⃣ Start Flask in a separate thread (keep-alive)
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # Run bots in main thread
+    # 2️⃣ Run bots in main asyncio loop (Telethon + Pyrogram + PTB)
     asyncio.run(start_bots())
-
-
 
 
 
