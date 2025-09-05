@@ -4346,12 +4346,9 @@ async def start_bots():
         application.add_handler(CommandHandler("character", character_command))
         application.add_handler(CallbackQueryHandler(character_callback, pattern="^char_"))
 
-        # === Periodic tasks ===
-        application.job_queue.run_repeating(
-            lambda ctx: asyncio.create_task(unmute_expired_task(application)),
-            interval=5,
-            first=5
-        )
+        # === Background tasks ===
+        # Run the unmute watcher once (not as repeating jobs)
+        asyncio.create_task(unmute_expired_task(application))
 
         print("[PTB] Bot started polling")
         await application.run_polling()
@@ -4364,12 +4361,9 @@ if __name__ == "__main__":
     # 1️⃣ Start Flask in a separate thread (keep-alive)
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # 2️⃣ Run bots in main asyncio loop (Telethon + Pyrogram + PTB)
-    asyncio.run(start_bots())
-
-
-
-
+    # 2️⃣ Use the same event loop that global clients (Pyrogram/Telethon) were bound to
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_bots())
 
 
 
