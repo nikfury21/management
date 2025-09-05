@@ -12,10 +12,14 @@ from telegram.ext import (
 from telegram.constants import ParseMode
 from telethon import TelegramClient
 from telegram import ChatPermissions as PTBChatPermissions
+from telegram.helpers import escape_markdown
+from telethon.errors import ChatAdminRequiredError, UserAdminInvalidError
 import re
+from telethon.tl.types import ChatParticipantAdmin, ChatParticipantCreator
 from datetime import datetime, timedelta, time as dt_time
 import time  # standard module for time.time()
 import time 
+from pyrogram.enums import ParseMode
 import io
 import asyncio
 from groq import Client
@@ -104,7 +108,6 @@ import os
 from pyrogram import Client as PyroClient
 import google.generativeai as genai
 from groq import Client
-
 API_ID = int(os.getenv("MNG_API_ID"))
 API_HASH = os.getenv("MNG_API_HASH")
 BOT_TOKEN = os.getenv("MNG_BOT_TOKEN")
@@ -398,29 +401,47 @@ query ($id: Int, $search: String) {
 }
 """
 
-
-CHARACTERS_QUERY = """
-query ($id: Int, $page: Int) {
-  Media(id: $id, type: ANIME) {
-    characters(page: $page, perPage: 25, sort: [ROLE, RELEVANCE, ID]) {
-      pageInfo {
-        total
-        perPage
-        currentPage
-        hasNextPage
-      }
+CHARACTER_QUERY = """
+query ($id: Int, $search: String) {
+  Character(id: $id, search: $search) {
+    id
+    name {
+      full
+      native
+    }
+    image {
+      large
+    }
+    description(asHtml: false)
+    siteUrl
+    media(perPage: 10) {
       edges {
-        role
         node {
+          id
+          title {
+            romaji
+          }
+          type
+          siteUrl
+        }
+        voiceActors(language: JAPANESE) {
+          id
           name {
             full
           }
+          siteUrl
         }
       }
     }
   }
 }
 """
+
+
+
+
+
+
 
 RELATIONS_QUERY = """
 query ($id: Int) {
@@ -487,6 +508,152 @@ async def prepare_animated(bot, file_id):
     bio = BytesIO(file_bytes)
     bio.name = "sticker.tgs"
     return bio
+
+async def character_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /character <name>")
+        return
+
+    search_name = " ".join(context.args)
+    variables = {"search": search_name}
+
+    response = requests.post(
+        ANILIST_URL,
+        json={"query": CHARACTER_QUERY, "variables": variables},
+        headers={"Content-Type": "application/json", "Accept": "application/json"}
+    ).json()
+
+    print("=== DEBUG Character Response ===")
+    print(json.dumps(response, indent=2))
+
+    if "errors" in response or not response.get("data", {}).get("Character"):
+        await update.message.reply_text("❌ Character not found.")
+        return
+
+    char = response["data"]["Character"]
+
+    # Basic fields
+    name = char["name"]["full"]
+    native = char["name"].get("native", "")
+    cid = char["id"]
+    url = char["siteUrl"]
+    image = char["image"]["large"]
+
+    # Find first JP voice actor (from media edges)
+    vactor = None
+    for edge in char.get("media", {}).get("edges", []):
+        if edge.get("voiceActors"):
+            vactor = edge["voiceActors"][0]
+            break
+
+    va_text = f"<a href='{vactor['siteUrl']}'>{vactor['name']['full']}</a>" if vactor else "N/A"
+
+    # Caption
+    caption = (
+        f"{native}\n"
+        f"({name})\n"
+        f"<b>ID:</b> <code>{cid}</code>\n\n"
+        f"<b>Voice Actor:</b> {va_text}\n\n"
+        f"🔗 <a href='{url}'>Visit Website</a>"
+    )
+
+    # Inline buttons
+    keyboard = [
+        [InlineKeyboardButton("📖 Description", callback_data=f"char_desc:{cid}")],
+        [InlineKeyboardButton("📺 List Series", callback_data=f"char_series:{cid}")]
+    ]
+
+    await update.message.reply_photo(
+        photo=image,
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+
+async def character_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    char_id = int(data.split(":")[1])
+    variables = {"id": char_id}
+    response = requests.post(
+        ANILIST_URL,
+        json={"query": CHARACTER_QUERY, "variables": variables},
+        headers={"Content-Type": "application/json", "Accept": "application/json"}
+    ).json()
+    char = response["data"]["Character"]
+
+    # --- Description ---
+    if data.startswith("char_desc:"):
+        desc = char.get("description", "No description available")
+        desc = re.sub(r"<.*?>", "", desc)  # strip HTML tags
+        if len(desc) > 900:
+            desc = desc[:900] + "..."
+
+        text = f"<b>Description:</b>\n\n{desc}"
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data=f"char_home:{char_id}")]]
+        await query.edit_message_caption(
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    # --- Series (Anime, italic clickable) ---
+    elif data.startswith("char_series:") or data.startswith("char_anime:"):
+        anime_list = [
+            f"• <i><a href='{edge['node']['siteUrl']}'>{edge['node']['title']['romaji']}</a></i>"
+            for edge in char["media"]["edges"] if edge["node"]["type"] == "ANIME"
+        ]
+        text = "📺 <b>Anime:</b>\n" + ("\n".join(anime_list) if anime_list else "No anime found.")
+
+        keyboard = [
+            [InlineKeyboardButton("📚 Manga", callback_data=f"char_manga:{char_id}")],
+            [InlineKeyboardButton("🔙 Back", callback_data=f"char_home:{char_id}")]
+        ]
+        await query.edit_message_caption(
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    # --- Series (Manga, italic clickable) ---
+    elif data.startswith("char_manga:"):
+        manga_list = [
+            f"• <i><a href='{edge['node']['siteUrl']}'>{edge['node']['title']['romaji']}</a></i>"
+            for edge in char["media"]["edges"] if edge["node"]["type"] == "MANGA"
+        ]
+        text = "📚 <b>Manga:</b>\n" + ("\n".join(manga_list) if manga_list else "No manga found.")
+
+        keyboard = [
+            [InlineKeyboardButton("📺 Anime", callback_data=f"char_anime:{char_id}")],
+            [InlineKeyboardButton("🔙 Back", callback_data=f"char_home:{char_id}")]
+        ]
+        await query.edit_message_caption(
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    # --- Back to Character Home ---
+    elif data.startswith("char_home:"):
+        caption = (
+            f"{char['name']['native']}\n({char['name']['full']})\n"
+            f"<b>ID:</b> <code>{char['id']}</code>\n\n"
+            f"🔗 <a href='{char['siteUrl']}'>Visit Website</a>"
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("📖 Description", callback_data=f"char_desc:{char_id}")],
+            [InlineKeyboardButton("📺 List Series", callback_data=f"char_series:{char_id}")]
+        ]
+        await query.edit_message_caption(
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
 
 
@@ -914,13 +1081,11 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Replied message has no text.")
         return
 
-    current_time = datetime.now().strftime("%I:%M %p")
-    current_date = datetime.now().strftime("%A, %B %d, %Y")
+
 
     # Build structured prompt
     query_prompt = (
         f"You are Dikshika ᥫ᭡, a polite and structured assistant.\n"
-        f"Time: {current_time}, Date: {current_date}\n\n"
         f"Provide a concise, accurate response with:\n"
         f"✘ Bold section headings\n"
         f"• Bullet points\n"
@@ -1049,6 +1214,7 @@ async def anime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
 
 
 
@@ -1201,49 +1367,58 @@ async def setfloodmode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-
 async def take_flood_action(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, action, duration="30m"):
     chat_id = update.effective_chat.id
-    # Get Telegram User object if needed
     user = await context.bot.get_chat(user_id)
     name = format_name(user)
+
+    # ✅ Check if already restricted (prevents duplicate mute messages)
+    member = await context.bot.get_chat_member(chat_id, user_id)
+    if member.can_send_messages is False and action in ["mute", "tmute"]:
+        return  # already muted, skip
+
     if action == "kick":
         try:
             await update.effective_chat.ban_member(user_id)
             await update.effective_chat.unban_member(user_id)
-            await update.message.reply_text(f"Kicked {name} for flooding.")
+            await context.bot.send_message(chat_id=chat_id, text=f"👢 Kicked {name} for flooding.")
         except Exception as e:
-            await update.message.reply_text(f"Error kicking flooder: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Error kicking flooder: {e}")
+
     elif action == "ban":
         try:
             await update.effective_chat.ban_member(user_id)
-            await update.message.reply_text(f"Banned {name} for flooding.")
+            await context.bot.send_message(chat_id=chat_id, text=f"⛔ Banned {name} for flooding.")
         except Exception as e:
-            await update.message.reply_text(f"Error banning flooder: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Error banning flooder: {e}")
+
     elif action == "mute":
         try:
-            await update.effective_chat.restrict_member(user_id,
-                permissions=PTBChatPermissions(can_send_messages=False))
-
-
-            await update.message.reply_text(f"Muted {name} for flooding.")
+            await update.effective_chat.restrict_member(
+                user_id,
+                permissions=PTBChatPermissions(can_send_messages=False)
+            )
+            await context.bot.send_message(chat_id=chat_id, text=f"🔇 Muted {name} for flooding.")
         except Exception as e:
-            await update.message.reply_text(f"Error muting flooder: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Error muting flooder: {e}")
+
     elif action == "tmute":
-        # Parse duration to seconds using your existing parser
         seconds = parse_time_to_seconds(duration)
         try:
-            await update.effective_chat.restrict_member(user_id,
-                permissions=PTBChatPermissions(can_send_messages=False))
-
-
-
-            # Store manual unmute
+            await update.effective_chat.restrict_member(
+                user_id,
+                permissions=PTBChatPermissions(can_send_messages=False),
+                until_date=int(time.time()) + seconds
+            )
             unmute_time = int(time.time()) + seconds
             temp_mutes[user_id] = (chat_id, unmute_time)
-            await update.message.reply_text(f"Temporarily muted {name} for flooding ({duration}).")
+
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⏳ Temporarily muted {name} for flooding ({duration})."
+            )
         except Exception as e:
-            await update.message.reply_text(f"Error temp muting flooder: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Error temp muting flooder: {e}")
 
 
 async def get_all_members(chat_id):
@@ -1360,7 +1535,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/kick - Kick user ",
         "/tmute - Temporarily mute user ",
         "/kickme - Kick yourself",
-        "/couples - Fun command (not implemented)",
+        "/waifu - Get you partner, approved by astro ",
         "/tagall - Tag all members",
         "/pin - Pin message (reply)",
         "/unpin - Unpin all messages",
@@ -1390,16 +1565,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/setgoodbye- set a goodbye message who lefts the group",
         "/when- shows when the message was sent",
         "/captcha- force user to solve captcha before interacting in group when he/she joins",
-        "/play - Play a song\n"
-        "/stop or /end - Stop playback and clear the queue\n"
-        "/pause - Pause playback\n"
-        "/resume - Resume playback\n"
-        "/skip - Skip current song\n"
-        "/clear - Clear the current queue\n"
-        "/song - Show current song info\n"
-        "/ping - Check bot status\n"
-        "/help - Show this help message\n"
-        "/vplay- ni aata meko"
+        "/pic - shows all pfp of a user",
+        "/free- free a user and allow to send stickers",
+        "/unfree- restrict a user from sending stickers",
+        "/freelist- shows all freed user",
+
     ]
     
     await update.message.reply_text("Available commands:\n" + "\n".join(commands))
@@ -1692,17 +1862,80 @@ async def admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = admin.user
         text += f"- {format_name(user)} (@{user.username})\n"
     await update.message.reply_text(text)
-
 async def promote(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_admin(update, update.message.from_user.id):
-        await update.message.reply_text("You must be an admin to promote users.")
+    chat = update.effective_chat
+    bot = context.bot
+
+    # Command issuer
+    admin = await bot.get_chat_member(chat.id, update.effective_user.id)
+
+    # Target user
+    target_user = await resolve_user(update, context)
+    if not target_user:
+        await update.message.reply_text("⚠️ Please reply to a user or mention them to promote/demote.")
         return
-    user = await resolve_user(update, context)
-    if not user:
+    user_id = target_user.id
+
+    if not user_id:
+        await update.message.reply_text("⚠️ Please reply to a user or mention them to promote.")
         return
+
+    # Self-promote prevention
+    if user_id == update.effective_user.id:
+        await update.message.reply_text("You can't promote yourself!")
+        return
+
+    # Permission check
+    can_promote = False
+    if admin.status == "creator":
+        can_promote = True
+    elif hasattr(admin, "can_promote_members"):
+        can_promote = admin.can_promote_members
+    elif hasattr(admin, "privileges"):
+        can_promote = getattr(admin.privileges, "can_promote_members", False)
+
+    if not can_promote:
+        await update.message.reply_text("You haven't enough rights to perform this action.")
+        return
+
+    # Bot itself
+    bot_member = await bot.get_chat_member(chat.id, bot.id)
+    bot_can_promote = False
+    if bot_member.status == "creator":
+        bot_can_promote = True
+    elif hasattr(bot_member, "can_promote_members"):
+        bot_can_promote = bot_member.can_promote_members
+    elif hasattr(bot_member, "privileges"):
+        bot_can_promote = getattr(bot_member.privileges, "can_promote_members", False)
+
+    if not bot_can_promote:
+        await update.message.reply_text("⚠️ I don’t have permission to promote members.")
+        return
+
+    # Target user info
+    target = await bot.get_chat_member(chat.id, user_id)
+
+    # Already admin?
+    if target.status in ["administrator", "creator"]:
+        await update.message.reply_text(
+            f"<a href='tg://user?id={user_id}'>{target.user.first_name}</a> is already an admin.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Custom admin title (fix: exclude first arg if it's mention/ID)
+    title = "Admin"
+    if context.args:
+        args = context.args
+        if args[0].startswith("@") or args[0].isdigit():
+            args = args[1:]
+        if args:
+            title = " ".join(args)
+
     try:
-        await update.effective_chat.promote_member(
-            user.id,
+        await bot.promote_chat_member(
+            chat.id,
+            user_id,
             can_change_info=True,
             can_delete_messages=True,
             can_invite_users=True,
@@ -1710,30 +1943,99 @@ async def promote(update: Update, context: ContextTypes.DEFAULT_TYPE):
             can_pin_messages=True,
             can_promote_members=False,
         )
-        await update.message.reply_text(f"{format_name(user)} promoted to admin.")
-    except BadRequest as e:
-        await update.message.reply_text(f"Error: {e}")
+        # Set custom title if supported
+        if title:
+            try:
+                await bot.set_chat_administrator_custom_title(chat.id, user_id, title)
+            except Exception:
+                pass
+
+        await update.message.reply_text(
+            f"✅ Promoted <a href='tg://user?id={user_id}'>{target.user.first_name}</a> as admin.",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to promote: {e}")
+
+
 
 async def demote(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_admin(update, update.message.from_user.id):
-        await update.message.reply_text("You must be an admin to demote users.")
+    chat = update.effective_chat
+    bot = context.bot
+
+    # Command issuer
+    admin = await bot.get_chat_member(chat.id, update.effective_user.id)
+
+    # Target user
+    target_user = await resolve_user(update, context)
+    if not target_user:
+        await update.message.reply_text("⚠️ Please reply to a user or mention them to promote/demote.")
         return
-    user = await resolve_user(update, context)
-    if not user:
+    user_id = target_user.id
+
+    if not user_id:
+        await update.message.reply_text("⚠️ Please reply to a user or mention them to demote.")
         return
+
+    # Self-demote prevention
+    if user_id == update.effective_user.id:
+        await update.message.reply_text("You can't demote yourself!")
+        return
+
+    # Permission check
+    can_promote = False
+    if admin.status == "creator":
+        can_promote = True
+    elif hasattr(admin, "can_promote_members"):
+        can_promote = admin.can_promote_members
+    elif hasattr(admin, "privileges"):
+        can_promote = getattr(admin.privileges, "can_promote_members", False)
+
+    if not can_promote:
+        await update.message.reply_text("You haven't enough rights to perform this action.")
+        return
+
+    # Bot itself
+    bot_member = await bot.get_chat_member(chat.id, bot.id)
+    bot_can_promote = False
+    if bot_member.status == "creator":
+        bot_can_promote = True
+    elif hasattr(bot_member, "can_promote_members"):
+        bot_can_promote = bot_member.can_promote_members
+    elif hasattr(bot_member, "privileges"):
+        bot_can_promote = getattr(bot_member.privileges, "can_promote_members", False)
+
+    if not bot_can_promote:
+        await update.message.reply_text("⚠️ I don’t have permission to demote members.")
+        return
+
+    # Target is a bot?
+    target = await bot.get_chat_member(chat.id, user_id)
+    if target.user.is_bot:
+        await update.message.reply_text(
+            "Due to telegram limitations I can't demote bots. Demote them manually!"
+        )
+        return
+
+    # Try to demote
     try:
-        await update.effective_chat.promote_member(
-            user.id,
+        await bot.promote_chat_member(
+            chat.id,
+            user_id,
             can_change_info=False,
             can_delete_messages=False,
             can_invite_users=False,
             can_restrict_members=False,
             can_pin_messages=False,
-            can_promote_members=False,
+            can_promote_members=False
         )
-        await update.message.reply_text(f"{format_name(user)} demoted from admin.")
-    except BadRequest as e:
-        await update.message.reply_text(f"Error: {e}")
+        await update.message.reply_text("✅ User demoted successfully.")
+    except Exception:
+        await update.message.reply_text(
+            "Error while demote: maybe they aren't promoted by me."
+        )
+
+
 
 async def addblacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, update.message.from_user.id):
@@ -2312,17 +2614,10 @@ async def get_partner(user_id: int, chat_members):
     return partner.id
 
 
-def escape_markdown(text: str) -> str:
-    escape_chars = r'[_*\[\]()~`>#+\-=|{}.!]'
-    return re.sub(escape_chars, r'\\\g<0>', text)
-
-
-
 async def send_waifu_photo(update, context, user_id: int, partner_id: int):
     bot = context.bot
     chat_id = update.effective_chat.id
 
-    # Get user info via Telethon
     try:
         user = await tclient.get_entity(user_id)
     except Exception:
@@ -2333,21 +2628,21 @@ async def send_waifu_photo(update, context, user_id: int, partner_id: int):
     except Exception:
         partner = None
 
-    user_name = escape_markdown(getattr(user, 'first_name', 'User') or 'User')
-    partner_name = escape_markdown(getattr(partner, 'first_name', 'User') or 'User')
+    user_name = getattr(user, 'first_name', 'User') or 'User'
+    partner_name = getattr(partner, 'first_name', 'User') or 'User'
 
-    caption = f"[{user_name}](tg://user?id={user_id})'s today's Waifu is : [{partner_name}](tg://user?id={partner_id}) "
+    caption = (
+        f"<a href='tg://user?id={user_id}'>{user_name}</a> today's Waifu is : "
+        f"<a href='tg://user?id={partner_id}'>{partner_name}</a> ({partner_id})\n\n"
+        "🌌 Hope you have a nice day couples!\n\n"
+        "♦️ Next waifu ~ 12:00 AM ( IST )"
+    )
 
     if partner:
         photos = await tclient.get_profile_photos(partner)
         if photos.total > 0:
-            # Download the highest resolution photo
             photo = photos[0]
-
-            # Download photo bytes into memory
             photo_bytes = await tclient.download_media(photo, file=bytes)
-
-            # Prepare photo for bot send_photo (using BytesIO)
             photo_io = io.BytesIO(photo_bytes)
             photo_io.name = "profile_photo.jpg"
 
@@ -2356,15 +2651,15 @@ async def send_waifu_photo(update, context, user_id: int, partner_id: int):
                     chat_id=chat_id,
                     photo=photo_io,
                     caption=caption,
-                    parse_mode=ParseMode.MARKDOWN_V2,
+                    parse_mode=ParseMode.HTML,
                 )
                 return
             except Exception as e:
-                # If sending photo fails, fallback to just sending the caption
-                await update.message.reply_text(f"Failed to send photo, sending text only.\n{e}")
-    # Send caption without photo if partner or photo not available
-    await bot.send_message(chat_id=chat_id, text=caption, parse_mode=ParseMode.MARKDOWN_V2)
+                await update.message.reply_text(
+                    f"Failed to send photo, sending text only.\n{e}"
+                )
 
+    await bot.send_message(chat_id=chat_id, text=caption, parse_mode=ParseMode.HTML)
 
 
 async def waifu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2398,6 +2693,11 @@ async def waifu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     participants = await tclient.get_participants(await tclient.get_entity(chat.id))
 
+    # ✅ New check: user must be in group
+    if not any(p.id == user_to_check.id for p in participants):
+        await update.message.reply_text(f"❌ {user_to_check.first_name} is not in this group.")
+        return
+
     partner_id = await get_partner(user_to_check.id, participants)
     if partner_id is None:
         await update.message.reply_text("Sorry, no users to pair with.")
@@ -2427,7 +2727,6 @@ def escape_md(text: str) -> str:
     """
     escape_chars = r'[_*[\]()~`>#+\-=|{}.!]'
     return re.sub(escape_chars, r'\\\g<0>', text)
-
 
 
 
@@ -3009,47 +3308,6 @@ async def afk_command(update, context):
 
 
 
-async def zombies_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = await tclient.get_entity(update.effective_chat.id)
-    deleted_acc_count = 0
-    async for user in tclient.iter_participants(chat):
-        if getattr(user, 'deleted', False):
-            deleted_acc_count += 1
-    if deleted_acc_count:
-        await update.message.reply_text(f"Found {deleted_acc_count} deleted account(s) in this group.")
-    else:
-        await update.message.reply_text("No deleted account(s) found.")
-
-async def rzombies_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = await tclient.get_entity(update.effective_chat.id)
-    removed = 0
-    failed_admins = 0
-    async for user in tclient.iter_participants(chat):
-        if getattr(user, 'deleted', False):
-            try:
-                await tclient(EditBannedRequest(
-                    chat.id, user,
-                    ChatBannedRights(until_date=datetime.timedelta(minutes=1), view_messages=True)
-                ))
-                removed += 1
-            except Exception as e:
-                # Detect if user is an admin (this check may depend on exception message or user rights)
-                # Here assuming any exception may indicate admin or protected user; customize as needed
-                failed_admins += 1
-    if removed:
-        await update.message.reply_text(f"Removed {removed} deleted account(s).")
-    if failed_admins:
-        await update.message.reply_text("Failed to remove deleted account as admin.")
-    if not removed and not failed_admins:
-        await update.message.reply_text("No deleted account(s) found to be removed.")
-
-
-
-
-
-
-
-
 
 async def getsticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message or not update.message.reply_to_message.sticker:
@@ -3511,6 +3769,8 @@ async def anime_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard))
 
+        # --- Character Description ---
+ 
 
 
 async def ud_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3944,6 +4204,98 @@ async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  • reply to media/text with /send <chat_id>"
     )
 
+# === FREE / UNFREE SYSTEM ===
+free_users = {}  # {chat_id: set(user_ids)}
+
+async def get_target_user(client, message, args):
+    """Get target user from reply or /command argument"""
+    if message.reply_to_message:
+        return message.reply_to_message.from_user
+
+    if args:
+        username_or_id = args[0].lstrip("@")
+        try:
+            if username_or_id.isdigit():
+                return await client.get_users(int(username_or_id))
+            else:
+                return await client.get_users(username_or_id)
+        except Exception:
+            return None
+    return None
+
+
+@pyro_client.on_message(pyro_filters.command("free"))
+async def free_user(client, message):
+    if not await is_admin_pyro(client, message.chat.id, message.from_user.id):
+        return await message.reply_text("🚫 Only admins can use this command.")
+
+    args = message.command[1:] if hasattr(message, "command") else []
+    target = await get_target_user(client, message, args)
+
+    if not target:
+        return await message.reply_text("Reply to a user or provide a username/ID.\nUsage: /free @username")
+
+    free_users.setdefault(message.chat.id, set()).add(target.id)
+    await message.reply_text(f"✅ {target.mention} can now send stickers & GIFs.")
+
+
+@pyro_client.on_message(pyro_filters.command("unfree"))
+async def unfree_user(client, message):
+    if not await is_admin_pyro(client, message.chat.id, message.from_user.id):
+        return await message.reply_text("🚫 Only admins can use this command.")
+
+    args = message.command[1:] if hasattr(message, "command") else []
+    target = await get_target_user(client, message, args)
+
+    if not target:
+        return await message.reply_text("Reply to a user or provide a username/ID.\nUsage: /unfree @username")
+
+    free_users.setdefault(message.chat.id, set()).discard(target.id)
+    await message.reply_text(f"❌ {target.mention} can no longer send stickers & GIFs.")
+
+
+@pyro_client.on_message(pyro_filters.command("freelist"))
+async def free_list(client, message):
+    if not await is_admin_pyro(client, message.chat.id, message.from_user.id):
+        return await message.reply_text("🚫 Only admins can use this command.")
+
+    users = free_users.get(message.chat.id, set())
+    if not users:
+        return await message.reply_text("❌ No free users in this chat.")
+
+    text = "✅ Free users:\n"
+    for uid in users:
+        try:
+            user = await client.get_users(uid)
+            text += f"- <a href='tg://user?id={uid}'>{user.first_name}</a>\n"
+        except Exception:
+            text += f"- <a href='tg://user?id={uid}'>{uid}</a>\n"
+
+    await message.reply_text(text, parse_mode=__import__("pyrogram.enums").enums.ParseMode.HTML)
+
+
+
+
+
+
+# === ENFORCE STICKER & GIF RESTRICTION ===
+@pyro_client.on_message(pyro_filters.sticker | pyro_filters.animation)
+async def block_unfree_media(client, message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    # ✅ Allow admins and bots always
+    if message.from_user.is_bot or await is_admin_pyro(client, chat_id, user_id):
+        return
+
+    # 🚫 Default = unfree, only free_users allowed
+    if user_id not in free_users.get(chat_id, set()):
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+
 
 load_lock_state()
 
@@ -4004,8 +4356,6 @@ def main():
     application.add_handler(CommandHandler("kang", kang))
     application.add_handler(MessageHandler(ptb_filters.ALL & ~ptb_filters.COMMAND, message_handler), group=1)
     application.add_handler(CommandHandler("afk", afk_command))
-    application.add_handler(CommandHandler("zombies", zombies_command))
-    application.add_handler(CommandHandler("rzombies", rzombies_command))
     application.add_handler(CommandHandler("getsticker", getsticker))
     application.add_handler(CommandHandler("tr", translate_command))
     application.add_handler(CommandHandler("translate", translate_list))
@@ -4033,6 +4383,12 @@ def main():
     application.add_handler(CommandHandler("captcha", captcha_toggle))
     application.add_handler(CallbackQueryHandler(captcha_pick, pattern=r"^capans:"))
     application.add_handler(CommandHandler("send", send_command))
+    application.add_handler(CommandHandler("character", character_command))
+    application.add_handler(CallbackQueryHandler(character_callback, pattern="^char_"))
+
+
+
+
 
 
 
