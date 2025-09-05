@@ -4233,11 +4233,12 @@ async def block_unfree_media(client, message):
 load_lock_state()
 
 
-# === Render-friendly entrypoint (full replacement) ===
+# === Render-friendly entrypoint (final replacement) ===
 import os
 import threading
 import asyncio
 import traceback
+import signal
 from flask import Flask
 from pyrogram import Client
 from telegram.ext import (
@@ -4347,24 +4348,43 @@ async def start_bots():
         application.add_handler(CallbackQueryHandler(character_callback, pattern="^char_"))
 
         # === Background tasks ===
-        # Run the unmute watcher once (not as repeating jobs)
         asyncio.create_task(unmute_expired_task(application))
 
+        # === Start PTB manually ===
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
         print("[PTB] Bot started polling")
-        await application.run_polling()
+
+        # === Graceful shutdown ===
+        stop_event = asyncio.Event()
+
+        def _stop(*_):
+            stop_event.set()
+
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, _stop)
+
+        await stop_event.wait()
+
+        print("[mng2] Shutting down...")
+        await application.updater.stop()
+        await application.stop()
+        await application.shutdown()
 
     except Exception as e:
         print("[mng2] Bot runner error:", e)
         traceback.print_exc()
 
+
 if __name__ == "__main__":
     # 1️⃣ Start Flask in a separate thread (keep-alive)
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # 2️⃣ Use the same event loop that global clients (Pyrogram/Telethon) were bound to
+    # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
