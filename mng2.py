@@ -4362,12 +4362,19 @@ def run_web():
 
     @app.route('/')
     def home():
-        return "Bot is running!", 200
+        return "✅ Bot is running!", 200
 
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    # Use Render's PORT env variable (Render sets this automatically)
+    port = int(os.environ.get("PORT", 8080))
+    print(f"[KeepAlive] Web server starting on port {port}...")
 
-threading.Thread(target=run_web).start()
+    # threaded=True helps handle multiple pings (e.g. from UptimeRobot)
+    app.run(host="0.0.0.0", port=port, threaded=True)
+
+# Run the webserver in a background thread so it doesn’t block your bot
+threading.Thread(target=run_web, daemon=True).start()
+
+
 
 
 
