@@ -4233,177 +4233,136 @@ async def block_unfree_media(client, message):
 load_lock_state()
 
 
-# === Render-friendly entrypoint ===
+# === Render-friendly entrypoint (fixed) ===
 import os
 import threading
 import asyncio
+import traceback
 from flask import Flask
 
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters as ptb_filters
+
+# === Flask app for keep-alive ===
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def home():
     return "✅ Bot is running!", 200
 
-
-def _start_bots():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    async def _runner():
-        try:
-            # Start Telethon userbot
-            if "tclient" in globals():
-                await tclient.start()
-                logger.info("Telethon userbot started")
-
-            # Start Pyrogram
-            if "pyro_client" in globals():
-                await pyro_client.start()
-                logger.info("Pyrogram client started")
-
-            # Build PTB application
-            application = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).build()
-
-            # === Register handlers (same as before) ===
-            application.add_handler(CommandHandler("start", start))
-            application.add_handler(CommandHandler("help", help_command))
-            application.add_handler(CommandHandler("info", info))
-            application.add_handler(CommandHandler("warn", warn))
-            application.add_handler(CommandHandler("del", delmsg))
-            application.add_handler(CommandHandler("ban", ban))
-            application.add_handler(CommandHandler("unban", unban))
-            application.add_handler(CommandHandler("admins", admins))
-            application.add_handler(CommandHandler("promote", promote))
-            application.add_handler(CommandHandler("demote", demote))
-            application.add_handler(CommandHandler("addblacklist", addblacklist))
-            application.add_handler(CommandHandler("unblacklist", unblacklist))
-            application.add_handler(CommandHandler("blacklist", showblacklist))
-            application.add_handler(CommandHandler("approve", approve))
-            application.add_handler(CommandHandler("unapprove", unapprove))
-            application.add_handler(CommandHandler("purge", purge))
-            application.add_handler(CommandHandler("mute", mute))
-            application.add_handler(CommandHandler("unmute", unmute))
-            application.add_handler(CommandHandler("id", user_id))
-            application.add_handler(CommandHandler("kick", kick))
-            application.add_handler(CommandHandler("tmute", tmute))
-            application.add_handler(CommandHandler("kickme", kickme))
-            application.add_handler(CommandHandler("nightmode", nightmode_command))
-            application.add_handler(CommandHandler("tagall", tagall))
-            application.add_handler(CommandHandler("stop", stop_tagall))
-            application.add_handler(CommandHandler("pin", pin))
-            application.add_handler(CommandHandler("unpin", unpin))
-            application.add_handler(CommandHandler("waifu", waifu_command))
-            application.add_handler(CommandHandler("setflood", setflood))
-            application.add_handler(CommandHandler("setfloodmode", setfloodmode))
-            application.add_handler(CommandHandler("blacklistmode", set_blacklist_mode))
-            application.add_handler(CommandHandler("ask", ask_command))
-            application.add_handler(CommandHandler("unfilter", unfilter))
-            application.add_handler(CommandHandler("filter", add_filter_command))
-            application.add_handler(CommandHandler("filters", list_filters_command))
-            application.add_handler(MessageHandler(ptb_filters.TEXT & ~ptb_filters.COMMAND, filter_trigger_handler))
-            application.add_handler(CommandHandler("anime", anime_command))
-            application.add_handler(CommandHandler("q", quote_command))
-            application.add_handler(CommandHandler("lock", lock_command))
-            application.add_handler(CommandHandler("unlock", unlock_command))
-            application.add_handler(CommandHandler("locks", locks_command))
-            application.add_handler(CommandHandler("kang", kang))
-            application.add_handler(MessageHandler(ptb_filters.ALL & ~ptb_filters.COMMAND, message_handler), group=1)
-            application.add_handler(CommandHandler("afk", afk_command))
-            application.add_handler(CommandHandler("getsticker", getsticker))
-            application.add_handler(CommandHandler("tr", translate_command))
-            application.add_handler(CommandHandler("translate", translate_list))
-            application.add_handler(CommandHandler("pp", pp_command))
-            application.add_handler(CommandHandler("calc", calc_command))
-            application.add_handler(CommandHandler("report", report_command))
-            application.add_handler(CommandHandler("anime", anime_command))
-            application.add_handler(CallbackQueryHandler(anime_callback, pattern="^anime_"))
-            application.add_handler(CommandHandler("ud", ud_command))
-            application.add_handler(CommandHandler("nightmode", nightmode_command))
-            application.add_handler(CallbackQueryHandler(nightmode_callback, pattern=r"^nightmode_(on|off):-?\d+$"))
-            application.add_handler(CommandHandler("resetwarns", resetwarns))
-            application.add_handler(CommandHandler("rmwarn", rmwarn))
-            application.add_handler(CommandHandler("welcome", welcome_toggle))
-            application.add_handler(CommandHandler("setwelcome", set_welcome))
-            application.add_handler(MessageHandler(ptb_filters.StatusUpdate.NEW_CHAT_MEMBERS, greet_new_member))
-            application.add_handler(CommandHandler("unapproveall", unapproveall))
-            application.add_handler(CommandHandler("approved", approved))
-            application.add_handler(CommandHandler("unblacklistall", unblacklistall))
-            application.add_handler(CommandHandler("warns", warns))
-            application.add_handler(CommandHandler("goodbye", goodbye_toggle))
-            application.add_handler(CommandHandler("setgoodbye", set_goodbye))
-            application.add_handler(MessageHandler(ptb_filters.StatusUpdate.LEFT_CHAT_MEMBER, send_goodbye))
-            application.add_handler(CommandHandler("when", when))
-            application.add_handler(CommandHandler("captcha", captcha_toggle))
-            application.add_handler(CallbackQueryHandler(captcha_pick, pattern=r"^capans:"))
-            application.add_handler(CommandHandler("send", send_command))
-            application.add_handler(CommandHandler("character", character_command))
-            application.add_handler(CallbackQueryHandler(character_callback, pattern="^char_"))
-            application.add_handler(CallbackQueryHandler(anime_callback, pattern="^anime_"))
-
-            # === Periodic tasks ===
-            application.job_queue.run_repeating(
-                lambda ctx: asyncio.create_task(unmute_expired_task(application)),
-                interval=5, first=5
-            )
-
-            logger.info("Bot started polling")
-            await application.initialize()
-            await application.start()
-            await application.updater.start_polling()
-            await application.updater.idle()
-        except Exception as e:
-            print("[mng2] Bot runner error:", e)
-
-    loop.run_until_complete(_runner())
-
-
-if __name__ == "__main__":
-    # Start bot thread
-    threading.Thread(target=_start_bots, daemon=True).start()
-
-    # Run Flask in main thread so Render sees the port
+def run_flask():
     port = int(os.environ.get("PORT", 8080))
     print(f"[KeepAlive] Web server starting on port {port}...")
-    flask_app.run(host="0.0.0.0", port=port)
+    flask_app.run(host="0.0.0.0", port=port, threaded=True)
 
+# === Bot runner ===
+async def start_bots():
+    try:
+        # --- Telethon userbot ---
+        if "tclient" in globals():
+            await tclient.start()
+            print("[Telethon] Userbot started")
 
+        # --- Pyrogram userbot ---
+        if "pyro_client" in globals():
+            await pyro_client.start()
+            print("[Pyrogram] Client started")
 
+        # --- PTB Application ---
+        application = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).build()
 
+        # --- Register handlers ---
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("info", info))
+        application.add_handler(CommandHandler("warn", warn))
+        application.add_handler(CommandHandler("del", delmsg))
+        application.add_handler(CommandHandler("ban", ban))
+        application.add_handler(CommandHandler("unban", unban))
+        application.add_handler(CommandHandler("admins", admins))
+        application.add_handler(CommandHandler("promote", promote))
+        application.add_handler(CommandHandler("demote", demote))
+        application.add_handler(CommandHandler("addblacklist", addblacklist))
+        application.add_handler(CommandHandler("unblacklist", unblacklist))
+        application.add_handler(CommandHandler("blacklist", showblacklist))
+        application.add_handler(CommandHandler("approve", approve))
+        application.add_handler(CommandHandler("unapprove", unapprove))
+        application.add_handler(CommandHandler("purge", purge))
+        application.add_handler(CommandHandler("mute", mute))
+        application.add_handler(CommandHandler("unmute", unmute))
+        application.add_handler(CommandHandler("id", user_id))
+        application.add_handler(CommandHandler("kick", kick))
+        application.add_handler(CommandHandler("tmute", tmute))
+        application.add_handler(CommandHandler("kickme", kickme))
+        application.add_handler(CommandHandler("nightmode", nightmode_command))
+        application.add_handler(CommandHandler("tagall", tagall))
+        application.add_handler(CommandHandler("stop", stop_tagall))
+        application.add_handler(CommandHandler("pin", pin))
+        application.add_handler(CommandHandler("unpin", unpin))
+        application.add_handler(CommandHandler("waifu", waifu_command))
+        application.add_handler(CommandHandler("setflood", setflood))
+        application.add_handler(CommandHandler("setfloodmode", setfloodmode))
+        application.add_handler(CommandHandler("blacklistmode", set_blacklist_mode))
+        application.add_handler(CommandHandler("ask", ask_command))
+        application.add_handler(CommandHandler("unfilter", unfilter))
+        application.add_handler(CommandHandler("filter", add_filter_command))
+        application.add_handler(CommandHandler("filters", list_filters_command))
+        application.add_handler(MessageHandler(ptb_filters.TEXT & ~ptb_filters.COMMAND, filter_trigger_handler))
+        application.add_handler(CommandHandler("anime", anime_command))
+        application.add_handler(CommandHandler("q", quote_command))
+        application.add_handler(CommandHandler("lock", lock_command))
+        application.add_handler(CommandHandler("unlock", unlock_command))
+        application.add_handler(CommandHandler("locks", locks_command))
+        application.add_handler(CommandHandler("kang", kang))
+        application.add_handler(MessageHandler(ptb_filters.ALL & ~ptb_filters.COMMAND, message_handler), group=1)
+        application.add_handler(CommandHandler("afk", afk_command))
+        application.add_handler(CommandHandler("getsticker", getsticker))
+        application.add_handler(CommandHandler("tr", translate_command))
+        application.add_handler(CommandHandler("translate", translate_list))
+        application.add_handler(CommandHandler("pp", pp_command))
+        application.add_handler(CommandHandler("calc", calc_command))
+        application.add_handler(CommandHandler("report", report_command))
+        application.add_handler(CallbackQueryHandler(anime_callback, pattern="^anime_"))
+        application.add_handler(CommandHandler("ud", ud_command))
+        application.add_handler(CallbackQueryHandler(nightmode_callback, pattern=r"^nightmode_(on|off):-?\d+$"))
+        application.add_handler(CommandHandler("resetwarns", resetwarns))
+        application.add_handler(CommandHandler("rmwarn", rmwarn))
+        application.add_handler(CommandHandler("welcome", welcome_toggle))
+        application.add_handler(CommandHandler("setwelcome", set_welcome))
+        application.add_handler(MessageHandler(ptb_filters.StatusUpdate.NEW_CHAT_MEMBERS, greet_new_member))
+        application.add_handler(CommandHandler("unapproveall", unapproveall))
+        application.add_handler(CommandHandler("approved", approved))
+        application.add_handler(CommandHandler("unblacklistall", unblacklistall))
+        application.add_handler(CommandHandler("warns", warns))
+        application.add_handler(CommandHandler("goodbye", goodbye_toggle))
+        application.add_handler(CommandHandler("setgoodbye", set_goodbye))
+        application.add_handler(MessageHandler(ptb_filters.StatusUpdate.LEFT_CHAT_MEMBER, send_goodbye))
+        application.add_handler(CommandHandler("when", when))
+        application.add_handler(CommandHandler("captcha", captcha_toggle))
+        application.add_handler(CallbackQueryHandler(captcha_pick, pattern=r"^capans:"))
+        application.add_handler(CommandHandler("send", send_command))
+        application.add_handler(CommandHandler("character", character_command))
+        application.add_handler(CallbackQueryHandler(character_callback, pattern="^char_"))
 
+        # --- Periodic tasks ---
+        application.job_queue.run_repeating(
+            lambda ctx: asyncio.create_task(unmute_expired_task(application)),
+            interval=5,
+            first=5
+        )
 
+        print("[PTB] Bot started polling")
+        await application.run_polling()
 
+    except Exception as e:
+        print("[mng2] Bot runner error:", e)
+        traceback.print_exc()
 
+if __name__ == "__main__":
+    # Start Flask keep-alive in a separate thread
+    threading.Thread(target=run_flask, daemon=True).start()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # Run bots in main thread
+    asyncio.run(start_bots())
 
 
 
