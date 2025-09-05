@@ -374,7 +374,7 @@ query ($id: Int, $search: String) {
       english
       native
     }
-    description
+    description(asHtml: false)
     source
     type
     averageScore
@@ -395,11 +395,29 @@ query ($id: Int, $search: String) {
     }
     coverImage {
       large
+      medium
     }
     siteUrl
+    characters(perPage: 10) {
+      edges {
+        role
+        node {
+          id
+          name {
+            full
+          }
+          image {
+            large
+          }
+          siteUrl
+        }
+      }
+    }
   }
 }
 """
+
+
 
 CHARACTER_QUERY = """
 query ($id: Int, $search: String) {
@@ -1569,6 +1587,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/free- free a user and allow to send stickers",
         "/unfree- restrict a user from sending stickers",
         "/freelist- shows all freed user",
+        "/character- get a overview of any anime character",
 
     ]
     
@@ -3535,102 +3554,107 @@ async def anime_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         page = int(parts[2]) if len(parts) > 2 else 1
 
         variables = {"id": anime_id, "page": page}
-        response = requests.post(ANILIST_URL, json={"query": CHARACTERS_QUERY, "variables": variables}).json()
-        chars_data = response["data"]["Media"]["characters"]
+        response = requests.post(
+            ANILIST_URL,
+            json={"query": ANIME_QUERY, "variables": variables},
+            headers={"Content-Type": "application/json"}
+        ).json()
 
-        characters = []
-        for edge in chars_data["edges"]:
-            role = "MAIN" if edge["role"] == "MAIN" else "SUPPORTING"
-            characters.append(f"• {edge['node']['name']['full']} ({role})")
+        media = response.get("data", {}).get("Media", {})
+        chars_info = media.get("characters", {})
+        edges = chars_info.get("edges", [])
+        page_info = chars_info.get("pageInfo", {})
 
-        total = chars_data["pageInfo"]["total"]
-        text = "Characters List:\n" + "\n".join(characters) + f"\n\nTotal Characters: {total}"
+        if not edges:
+            await query.edit_message_caption(
+                caption="❌ No character data found for this anime.",
+                parse_mode="HTML"
+            )
+            return
+
+        characters = [
+            f"• <a href='{edge['node']['siteUrl']}'>{edge['node']['name']['full']}</a> ({edge['role']})"
+            for edge in edges
+        ]
+        total = page_info.get("total", len(edges))
+        text = "🎭 <b>Characters List:</b>\n" + "\n".join(characters) + f"\n\nTotal Characters: {total}"
 
         # Pagination buttons
         buttons = []
         if page > 1:
             buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"anime_chars:{anime_id}:{page-1}"))
-        if chars_data["pageInfo"]["hasNextPage"]:
+        if page_info.get("hasNextPage"):
             buttons.append(InlineKeyboardButton("➡️ Next", callback_data=f"anime_chars:{anime_id}:{page+1}"))
 
         # Back button
         buttons.append(InlineKeyboardButton("🔙 Back", callback_data=f"anime_home:{anime_id}"))
-
         keyboard = [buttons]
 
-        if len(text) > 1024:
-            text = text[:1000] + "..."
-
-        await query.edit_message_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_caption(
+            caption=text[:1000] + "..." if len(text) > 1024 else text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     # --- Description ---
     elif data.startswith("anime_desc:"):
         anime_id = int(data.split(":")[1])
         variables = {"id": anime_id}
-        response = requests.post(ANILIST_URL, json={"query": ANIME_QUERY, "variables": variables}).json()
+        response = requests.post(
+            ANILIST_URL,
+            json={"query": ANIME_QUERY, "variables": variables}
+        ).json()
         anime = response["data"]["Media"]
 
-        desc = anime.get("description", "No description available").replace("<br>", "\n").replace("<i>", "").replace("</i>", "")
+        desc = anime.get("description", "No description available")
+        desc = re.sub(r"<.*?>", "", desc)  # strip AniList HTML
         if len(desc) > 900:
             desc = desc[:900] + "..."
 
-        text = f"Description:\n{desc}\n\nFor more info click below 👇"
+        text = f"📖 <b>Description:</b>\n\n{desc}"
 
         keyboard = [
             [InlineKeyboardButton("🔗 More Info", url=anime["siteUrl"])],
             [InlineKeyboardButton("🔙 Back", callback_data=f"anime_home:{anime_id}")]
         ]
 
-        await query.edit_message_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_caption(caption=text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    # --- Series List ---
+    # --- Related Series ---
     elif data.startswith("anime_series:"):
         anime_id = int(data.split(":")[1])
-
-        RELATIONS_QUERY = """
-        query ($id: Int) {
-          Media(id: $id, type: ANIME) {
-            relations {
-              edges {
-                relationType
-                node {
-                  title { romaji }
-                  type
-                  siteUrl
-                }
-              }
-            }
-          }
-        }
-        """
         variables = {"id": anime_id}
-        response = requests.post(ANILIST_URL, json={"query": RELATIONS_QUERY, "variables": variables}).json()
+        response = requests.post(
+            ANILIST_URL,
+            json={"query": RELATIONS_QUERY, "variables": variables}
+        ).json()
         relations = response["data"]["Media"]["relations"]["edges"]
 
-        series_list = []
-        for rel in relations[:15]:  # Limit first 15
-            name = rel["node"]["title"]["romaji"]
-            rtype = rel["relationType"]
-            stype = rel["node"]["type"]
-            series_list.append(f"• {name} ({stype}) {rtype}")
-
-        text = "Series List:\n" + "\n".join(series_list) + "\n\nFor more info click below 👇"
+        series_list = [
+            f"• <a href='{rel['node']['siteUrl']}'>{rel['node']['title']['romaji']}</a> ({rel['relationType']})"
+            for rel in relations[:15]
+        ]
+        text = "📺 <b>Related Series:</b>\n" + ("\n".join(series_list) if series_list else "No related series found.")
 
         keyboard = [
             [InlineKeyboardButton("🔗 More Info", url=f"https://anilist.co/anime/{anime_id}")],
             [InlineKeyboardButton("🔙 Back", callback_data=f"anime_home:{anime_id}")]
         ]
 
-        if len(text) > 1024:
-            text = text[:1000] + "..."
-
-        await query.edit_message_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_caption(
+            caption=text[:1000] + "..." if len(text) > 1024 else text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     # --- Back to Home ---
     elif data.startswith("anime_home:"):
         anime_id = int(data.split(":")[1])
         variables = {"id": anime_id}
-        response = requests.post(ANILIST_URL, json={"query": ANIME_QUERY, "variables": variables}).json()
+        response = requests.post(
+            ANILIST_URL,
+            json={"query": ANIME_QUERY, "variables": variables}
+        ).json()
         anime = response["data"]["Media"]
 
         title = anime["title"]["romaji"] or anime["title"]["english"] or "Unknown"
@@ -3641,51 +3665,18 @@ async def anime_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         score = f"{anime['averageScore']}% 🌟" if anime.get("averageScore") else "N/A"
         duration = f"{anime['duration']} min/ep" if anime.get("duration") else "N/A"
         status = anime.get("status", "N/A")
-        episodes = anime.get("episodes") or anime.get("episodesAired") or "N/A"
+        episodes = anime.get("episodes", "N/A")
         if status == "FINISHED" and episodes != "N/A":
             status = f"{status} | {episodes} eps"
 
-
         genres = ", ".join(anime.get("genres", [])[:5]) or "N/A"
         tags = ", ".join(tag["name"] for tag in anime.get("tags", [])[:8]) or "N/A"
-
         trailer = "N/A"
         if anime.get("trailer"):
             if anime["trailer"]["site"] == "youtube":
                 trailer = f"https://youtu.be/{anime['trailer']['id']}"
             else:
                 trailer = f"{anime['trailer']['site']}/{anime['trailer']['id']}"
-        title = anime["title"]["romaji"]
-        english = anime["title"]["english"]
-        mal_id = anime["idMal"]
-        source = anime.get("source", "N/A")
-        atype = anime.get("format", "N/A")
-        score = anime.get("averageScore", "N/A")
-        duration = anime.get("duration", "N/A")
-        status = anime.get("status", "N/A")
-        episodes = anime.get("episodes") or anime.get("episodesAired") or "N/A"
-        if status == "FINISHED" and episodes != "N/A":
-            status = f"{status} | {episodes} eps"
-
-        next_airing = (
-            (anime.get("nextAiringEpisode") or {}).get("timeUntilAiring", "N/A")
-
-            if anime
-            else "N/A"
-        )
-
-        genres = ", ".join(anime.get("genres", [])) or "N/A"
-        tags = ", ".join([tag["name"] for tag in anime.get("tags", [])[:5]]) or "N/A"
-        trailer = "N/A"
-        if anime.get("trailer"):
-            site = anime["trailer"].get("site")
-            tid = anime["trailer"].get("id")
-            if site and tid:
-                if site.lower() == "youtube":
-                    trailer = f"https://youtu.be/{tid}"
-                else:
-                    trailer = f"{site}/{tid}"
-
 
         caption = (
             f"[🇯🇵]<b>{title}</b> | {english}\n"
@@ -3695,17 +3686,11 @@ async def anime_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"➤ <b>SCORE:</b> <code>{score}</code>\n"
             f"➤ <b>DURATION:</b> <code>{duration}</code>\n"
             f"➤ <b>STATUS:</b> <code>{status}</code>\n"
-            f"➤ <b>NEXT AIRING:</b> <code>{next_airing}</code>\n"
             f"➤ <b>GENRES:</b> <code>{genres}</code>\n"
             f"➤ <b>TAGS:</b> <code>{tags}</code>\n"
             f'🎬 <a href="{trailer}">Trailer</a>\n'
             f"📖 <a href='{anime['siteUrl']}'>Official Site</a>"
         )
-
-
-
-        if len(caption) > 1024:
-            caption = caption[:1000] + "..."
 
         keyboard = [
             [InlineKeyboardButton("🎭 Characters", callback_data=f"anime_chars:{anime['id']}:1")],
@@ -3714,63 +3699,11 @@ async def anime_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await query.edit_message_caption(
-            caption=caption,
-            parse_mode=ParseMode.HTML,
+            caption=caption[:1000] + "..." if len(caption) > 1024 else caption,
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-                # --- Description ---
-    elif data.startswith("anime_desc:"):
-        anime_id = int(data.split(":")[1])
-        variables = {"id": anime_id}
-        response = requests.post(ANILIST_URL, json={"query": ANIME_QUERY, "variables": variables}).json()
-        anime = response["data"]["Media"]
 
-        # Clean description (remove HTML tags AniList uses)
-        desc = anime.get("description", "No description available")
-        desc = desc.replace("<br>", "\n").replace("<i>", "").replace("</i>", "").replace("<b>", "").replace("</b>", "")
-
-        # Limit size for Telegram
-        if len(desc) > 900:
-            desc = desc[:900] + "..."
-
-        text = f"Description:\n{desc}\n\nFor more info click below 👇"
-
-        keyboard = [
-            [InlineKeyboardButton("🔗 More Info", url=anime["siteUrl"])],
-            [InlineKeyboardButton("🔙 Back", callback_data=f"anime_home:{anime_id}")]
-        ]
-
-        await query.edit_message_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard))
-
-                # --- Series List ---
-    elif data.startswith("anime_series:"):
-        anime_id = int(data.split(":")[1])
-
-        variables = {"id": anime_id}
-        response = requests.post(ANILIST_URL, json={"query": RELATIONS_QUERY, "variables": variables}).json()
-        relations = response["data"]["Media"]["relations"]["edges"]
-
-        series_list = []
-        for rel in relations[:15]:  # Limit to first 15 to avoid Telegram cutoff
-            name = rel["node"]["title"]["romaji"]
-            rtype = rel["relationType"]
-            stype = rel["node"]["type"]
-            series_list.append(f"• {name} ({stype}) {rtype}")
-
-        text = "Series List:\n" + "\n".join(series_list) + "\n\nFor more info click below 👇"
-
-        if len(text) > 1024:
-            text = text[:1000] + "..."
-
-        keyboard = [
-            [InlineKeyboardButton("🔗 More Info", url=f"https://anilist.co/anime/{anime_id}")],
-            [InlineKeyboardButton("🔙 Back", callback_data=f"anime_home:{anime_id}")]
-        ]
-
-        await query.edit_message_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard))
-
-        # --- Character Description ---
- 
 
 
 async def ud_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4385,6 +4318,7 @@ def main():
     application.add_handler(CommandHandler("send", send_command))
     application.add_handler(CommandHandler("character", character_command))
     application.add_handler(CallbackQueryHandler(character_callback, pattern="^char_"))
+    application.add_handler(CallbackQueryHandler(anime_callback, pattern="^anime_"))
 
 
 
