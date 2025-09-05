@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: my-telegram-bot
+    env: docker
+    plan: free   # or starter, depending on your choice
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 10000
