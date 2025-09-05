@@ -29,14 +29,15 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first (for caching)
 COPY requirements.txt .
 
-# Upgrade pip (avoids old pip bugs) and install Python dependencies
+# Upgrade pip and install Python dependencies
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright Chromium with dependencies
-RUN playwright install --with-deps chromium
+# ✅ Install Playwright browsers after playwright is installed
+RUN python -m playwright install --with-deps chromium
 
 # Copy the rest of the code
 COPY . .
 
 # Start your bot
 CMD ["python", "mng2.py"]
+
