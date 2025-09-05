@@ -4,12 +4,13 @@ FROM python:3.10-slim
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies (added git)
+# Install system dependencies (git, ffmpeg, fonts, chromium, playwright deps)
 RUN apt-get update && apt-get install -y \
     git \
     ffmpeg \
     wget \
     curl \
+    chromium \
     libnss3 \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
@@ -26,18 +27,18 @@ RUN apt-get update && apt-get install -y \
     fonts-freefont-ttf \
     && rm -rf /var/lib/apt/lists/*
 
+# Tell Playwright to use system Chromium
+ENV PLAYWRIGHT_BROWSERS_PATH=/usr/bin
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 # Copy requirements first (for caching)
 COPY requirements.txt .
 
 # Upgrade pip and install Python dependencies
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# ✅ Install Playwright browsers after playwright is installed
-RUN python -m playwright install --with-deps chromium
-
 # Copy the rest of the code
 COPY . .
 
 # Start your bot
 CMD ["python", "mng2.py"]
-
