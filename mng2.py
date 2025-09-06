@@ -1,3 +1,12 @@
+import sys
+import asyncio
+
+import sys, asyncio
+
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
 import logging
 import random
 from telegram import Update, ChatPermissions as PTBChatPermissions
@@ -176,6 +185,10 @@ nightmode_status = {}
 welcome_settings = {}  # {chat_id: {"enabled": bool, "message": dict}}
 goodbye_settings = {}  # {chat_id: {"enabled": bool, "message": dict}}
 captcha_settings = {}   # {chat_id: True/False}
+sticker_blacklist = {}   # chat_id -> set of sticker_file_ids
+pack_blacklist = {}      # chat_id -> set of set_name (sticker pack names)
+sticker_map = {}         # short_id -> real sticker.file_id
+pack_map = {}            # short_id -> real pack_name
 
 
 
@@ -897,6 +910,9 @@ async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def lock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info", "can_delete_messages"]):
+        return await update.message.reply_text("🚫 You need both 'Can Change Info' and 'Can Delete Messages' permissions to manage locks.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("🚫 Only admins can use this command.")
         return
@@ -913,6 +929,9 @@ async def lock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ {key} locked.")
 
 async def unlock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info", "can_delete_messages"]):
+        return await update.message.reply_text("🚫 You need both 'Can Change Info' and 'Can Delete Messages' permissions to manage locks.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("🚫 Only admins can use this command.")
         return
@@ -1237,6 +1256,9 @@ async def anime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_filter_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info"]):
+        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to use filter commands.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("Only admins can add filters.")
         return
@@ -1265,6 +1287,9 @@ async def add_filter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def unfilter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info"]):
+        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to use filter commands.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be admin to remove filters.")
         return
@@ -1315,19 +1340,40 @@ def boldify(text: str) -> str:
 
 
 
-
 async def set_blacklist_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_admin(update, update.message.from_user.id):
-        await update.message.reply_text("Only admins can set the blacklist mode.")
-        return
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
 
-    if not context.args or context.args[0].lower() not in ("tmute", "mute", "ban", "warn", "kick", "delete"):
-        await update.message.reply_text("Usage: /blacklistmode [tmute/mute/ban/warn/kick/delete]")
-        return
+    if not await is_admin(update, user_id):
+        return await update.message.reply_text("You must be an admin to set blacklist mode.")
 
-    action = context.args[0].lower()
-    blacklist_modes[update.effective_chat.id] = action
-    await update.message.reply_text(f"Blacklist mode set to: {action}")
+    if not context.args:
+        return await update.message.reply_text("Usage: /setblacklistmode <mode> [duration if tmute]")
+
+    mode = context.args[0].lower()
+
+    valid_modes = ["warn", "delete", "kick", "ban", "mute", "tmute"]
+    if mode not in valid_modes:
+        return await update.message.reply_text(
+            f"Invalid mode. Choose one of: {', '.join(valid_modes)}"
+        )
+
+    if mode == "tmute":
+        # default duration if not provided
+        duration_str = context.args[1] if len(context.args) > 1 else "30m"
+        seconds = parse_time_to_seconds(duration_str)
+        if seconds <= 0:
+            return await update.message.reply_text("Invalid duration format. Example: 5s, 10m, 2h, 1d")
+
+        blacklist_modes[chat_id] = (mode, duration_str)
+        return await update.message.reply_text(
+            f"✅ Blacklist mode set to *Temporary Mute* for {duration_str}.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    else:
+        blacklist_modes[chat_id] = mode
+        return await update.message.reply_text(f"✅ Blacklist mode set to *{mode.title()}*.", parse_mode=ParseMode.MARKDOWN)
+
 
 
 
@@ -1351,6 +1397,9 @@ async def is_member_admin(chat, user_id):
 
     
 async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info"]):
+        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to configure flood settings.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("Only admins can set flood limit.")
         return
@@ -1365,6 +1414,9 @@ async def setflood(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def setfloodmode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info"]):
+        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to configure flood settings.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("Only admins can set flood mode.")
         return
@@ -1588,6 +1640,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/unfree- restrict a user from sending stickers",
         "/freelist- shows all freed user",
         "/character- get a overview of any anime character",
+        "/unfilterall- removes all filters",
 
     ]
     
@@ -1737,6 +1790,9 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_restrict_members"]):
+        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be an admin to warn users.")
         return
@@ -1760,6 +1816,9 @@ async def warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Couldn't ban user: {e}")
 
 async def resetwarns(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_restrict_members"]):
+        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("Only admins can reset warnings.")
         return
@@ -1783,6 +1842,9 @@ async def resetwarns(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def rmwarn(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_restrict_members"]):
+        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("Only admins can remove warnings.")
         return
@@ -1811,6 +1873,9 @@ async def rmwarn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def delmsg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_delete_messages"]):
+        return await update.message.reply_text("🚫 You need 'Can Delete Messages' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be an admin to delete messages.")
         return
@@ -1824,6 +1889,9 @@ async def delmsg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {e}")
 
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_restrict_members"]):
+        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be an admin to ban users.")
         return
@@ -1841,6 +1909,9 @@ async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {e}")
 
 async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_restrict_members"]):
+        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be admin to unban users.")
         return
@@ -2056,35 +2127,130 @@ async def demote(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+import uuid
+
 async def addblacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info", "can_delete_messages"]):
+        return await update.message.reply_text("🚫 You need both 'Can Change Info' and 'Can Delete Messages' permissions.")
+
     if not await is_admin(update, update.message.from_user.id):
-        await update.message.reply_text("You must be an admin to add blacklist words.")
-        return
+        return await update.message.reply_text("You must be an admin to add blacklist entries.")
+
+    msg = update.message
+
+    # --- Case 1: Admin replied to a sticker ---
+    if msg.reply_to_message and msg.reply_to_message.sticker:
+        sticker = msg.reply_to_message.sticker
+
+        # generate short IDs
+        sid = str(uuid.uuid4())[:8]
+        pid = str(uuid.uuid4())[:8]
+
+        sticker_map[sid] = sticker.file_id
+        pack_map[pid] = sticker.set_name or "single"
+
+        buttons = [
+            [
+                InlineKeyboardButton("➕ Add this sticker", callback_data=f"bl_add_sticker:{sid}"),
+                InlineKeyboardButton("➕ Add whole pack", callback_data=f"bl_add_pack:{pid}"),
+            ]
+        ]
+        return await msg.reply_text("Choose how to blacklist:", reply_markup=InlineKeyboardMarkup(buttons))
+
+    # --- Case 2: Admin provided a word (existing logic) ---
     if not context.args:
-        await update.message.reply_text("Usage: /addblacklist <word>")
-        return
+        return await msg.reply_text("Usage: /addblacklist <word> or reply with a sticker")
+
     word = context.args[0].lower()
     blacklist.add(word)
-    await update.message.reply_text(f"Added '{word}' to blacklist.")
+    await msg.reply_text(f"✅ Added word '{word}' to blacklist.")
+
+
 
 async def unblacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info", "can_delete_messages"]):
+        return await update.message.reply_text("🚫 You need both 'Can Change Info' and 'Can Delete Messages' permissions.")
+
     if not await is_admin(update, update.message.from_user.id):
-        await update.message.reply_text("You must be an admin to remove blacklist words.")
-        return
+        return await update.message.reply_text("You must be an admin to remove blacklist entries.")
+
+    msg = update.message
+
+    # --- Case 1: Admin replied to a sticker ---
+    if msg.reply_to_message and msg.reply_to_message.sticker:
+        sticker = msg.reply_to_message.sticker
+
+        # generate short IDs
+        sid = str(uuid.uuid4())[:8]
+        pid = str(uuid.uuid4())[:8]
+
+        sticker_map[sid] = sticker.file_id
+        pack_map[pid] = sticker.set_name or "single"
+
+        buttons = [
+            [
+                InlineKeyboardButton("❌ Remove this sticker", callback_data=f"bl_remove_sticker:{sid}"),
+                InlineKeyboardButton("❌ Remove whole pack", callback_data=f"bl_remove_pack:{pid}"),
+            ]
+        ]
+        return await msg.reply_text("Choose how to unblacklist:", reply_markup=InlineKeyboardMarkup(buttons))
+
+    # --- Case 2: Admin provided a word (existing logic) ---
     if not context.args:
-        await update.message.reply_text("Usage: /unblacklist <word>")
-        return
+        return await msg.reply_text("Usage: /unblacklist <word> or reply with a sticker")
+
     word = context.args[0].lower()
     blacklist.discard(word)
-    await update.message.reply_text(f"Removed '{word}' from blacklist.")
+    await msg.reply_text(f"✅ Removed word '{word}' from blacklist.")
+
+
+
+
+async def blacklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = update.effective_chat.id
+
+    action, sid = query.data.split(":", 1)
+
+    if action == "bl_add_sticker":
+        real_id = sticker_map.get(sid)
+        if real_id:
+            sticker_blacklist.setdefault(chat_id, set()).add(real_id)
+        await query.edit_message_text("✅ Sticker blacklisted.")
+
+    elif action == "bl_add_pack":
+        real_pack = pack_map.get(sid)
+        if real_pack:
+            pack_blacklist.setdefault(chat_id, set()).add(real_pack)
+        await query.edit_message_text("✅ Whole pack blacklisted.")
+
+    elif action == "bl_remove_sticker":
+        real_id = sticker_map.get(sid)
+        if real_id:
+            sticker_blacklist.get(chat_id, set()).discard(real_id)
+        await query.edit_message_text("❌ Sticker removed from blacklist.")
+
+    elif action == "bl_remove_pack":
+        real_pack = pack_map.get(sid)
+        if real_pack:
+            pack_blacklist.get(chat_id, set()).discard(real_pack)
+        await query.edit_message_text("❌ Pack removed from blacklist.")
+
 
 async def showblacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info", "can_delete_messages"]):
+        return await update.message.reply_text("🚫 You need both 'Can Change Info' and 'Can Delete Messages' permissions.")
+
     if blacklist:
         await update.message.reply_text("Blacklist:\n" + ", ".join(blacklist))
     else:
         await update.message.reply_text("Blacklist is empty.")
 
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info"]):
+        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be an admin to approve users.")
         return
@@ -2113,6 +2279,9 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def unapprove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info"]):
+        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be an admin to unapprove users.")
         return
@@ -2160,17 +2329,63 @@ async def filter_trigger_handler(update: Update, context: ContextTypes.DEFAULT_T
         if text in filters_db[chat_id]:
             saved_msg_id = filters_db[chat_id][text]
             try:
-                # Copy the original message from chat itself so it looks fresh
+                # Try replying to the user's message
+                await context.bot.copy_message(
+                    chat_id=message.chat.id,
+                    from_chat_id=message.chat.id,
+                    message_id=saved_msg_id,
+                    reply_to_message_id=message.message_id
+                )
+            except Exception:
+                # Fallback: just send normally if reply fails
                 await context.bot.copy_message(
                     chat_id=message.chat.id,
                     from_chat_id=message.chat.id,
                     message_id=saved_msg_id,
                 )
-            except Exception as e:
-                await message.reply_text(f"⚠️ Error triggering filter: {e}")
+
+async def unfilterall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    message = update.effective_message
+
+    # Check if the user is chat creator
+    member = await chat.get_member(user.id)
+    if member.status != "creator":
+        return await message.reply_text("🚫 Only the group owner can use this command.")
+
+    chat_id = str(chat.id)
+
+    if chat_id not in filters_db or not filters_db[chat_id]:
+        return await message.reply_text("ℹ️ No filters are set in this chat.")
+
+    # Clear all filters for this chat
+    filters_db[chat_id].clear()
+
+    return await message.reply_text("✅ All filters have been removed.")
 
 
 
+async def has_permission(update: Update, perms: list[str]) -> bool:
+    chat = update.effective_chat
+    user = update.effective_user
+    member = await chat.get_member(user.id)
+
+    # Creator always has all permissions
+    if member.status == "creator":
+        return True
+
+    # For administrators
+    if member.status == "administrator":
+        # In PTB 20+, privileges is the right field
+        if hasattr(member, "privileges") and member.privileges:
+            return all(getattr(member.privileges, p, False) for p in perms)
+
+        # Fallback: check attributes directly
+        return all(getattr(member, p, False) for p in perms)
+
+    # Normal members → no extra rights
+    return False
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2203,9 +2418,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ENFORCE LOCKED TYPES FOR NON-ADMINS
     if not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
         m = message
-    # media locks etc...
-
-        # Media umbrella
+        # media locks etc...
         if "media" in locked and (getattr(m, "media", None) or getattr(m, "sticker", None) or getattr(m, "animation", None)
                                   or getattr(m, "document", None) or getattr(m, "photo", None) or getattr(m, "video", None)
                                   or getattr(m, "audio", None) or getattr(m, "voice", None)):
@@ -2215,7 +2428,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-        # Specific media types and others
         if "messages" in locked and (m.text and not getattr(m, "media", None) and not getattr(m, "via_bot", None)):
             try:
                 await m.delete()
@@ -2353,17 +2565,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---- END LOCK ENFORCEMENT ----
 
-    # Skip processing for approved users
-    # Skip processing for approved users
     if sender_id in approved_users.get(chat_id, set()):
         return
-
 
     # Flood Protection
     flood_limit = flood_settings.get(chat_id)
     flood_mode = flood_modes.get(chat_id, default_flood_mode)
     if flood_limit and not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
-
         key = (chat_id, sender_id)
         last_count, last_msg_id = user_flood_counts.get(key, (0, None))
         if last_msg_id and message.message_id == last_msg_id + 1:
@@ -2376,80 +2584,128 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await take_flood_action(update, context, sender_id, action, duration)
             user_flood_counts[key] = (0, None)
 
-    # Blacklist Check
-    text = message.text or message.caption or ""
-    if text and not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
-        lower_text = text.lower()
-        triggered_word = None
-        for word in blacklist:
-            if word in lower_text:
-                triggered_word = word
-                break
-        if triggered_word:
+    # ---- Blacklist Check (words + stickers + packs) ----
+    if not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
+        triggered_type = None
+        triggered_value = None
+
+        # text
+        text = message.text or message.caption or ""
+        if text:
+            lower_text = text.lower()
+            for word in blacklist:
+                if word in lower_text:
+                    triggered_type = "word"
+                    triggered_value = word
+                    break
+
+        # sticker
+        if not triggered_type and message.sticker:
+            if chat_id in sticker_blacklist and message.sticker.file_id in sticker_blacklist[chat_id]:
+                triggered_type = "sticker"
+                triggered_value = "sticker"
+            elif message.sticker.set_name and chat_id in pack_blacklist and message.sticker.set_name in pack_blacklist[chat_id]:
+                triggered_type = "pack"
+                triggered_value = f"sticker pack {message.sticker.set_name}"
+
+        if triggered_type:
             action = blacklist_modes.get(chat_id, "warn")
+
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            reason_text = f"{message.from_user.mention_html()} "
+
             if action == "warn":
                 count = warnings.get(sender_id, 0) + 1
                 warnings[sender_id] = count
                 if count < 3:
-                    await message.reply_text(
-                        f"{message.from_user.mention_html()} warned ({count}/3).",
+                    await update.effective_chat.send_message(
+                        f"{reason_text}warned ({count}/3).\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
                         parse_mode=ParseMode.HTML,
                     )
                 else:
                     try:
                         await message.chat.ban_member(sender_id)
-                        await message.reply_text(
-                            f"{message.from_user.mention_html()} banned after 3 warnings.",
+                        await update.effective_chat.send_message(
+                            f"{reason_text}banned after 3 warnings.\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
                             parse_mode=ParseMode.HTML,
                         )
                         warnings[sender_id] = 0
                     except Exception as e:
-                        await message.reply_text(f"Failed to ban user: {e}")
-            elif action in ("tmute", "mute"):
-                try:
-                    until_date = None
-                    if action == "tmute":
-                        until_date = message.date + timedelta(minutes=30)
-                    await message.chat.restrict_member(
-                        sender_id,
-                        permissions=PTBChatPermissions(can_send_messages=False),
-                        until_date=until_date,
-                    )
+                        await update.effective_chat.send_message(f"Failed to ban user: {e}")
 
-                    mute_type = "temporarily muted" if action == "tmute" else "muted"
-                    await message.reply_text(
-                        f"{message.from_user.mention_html()} has been {mute_type}.",
+            elif (isinstance(action, str) and action in ("tmute", "mute")) or (
+                isinstance(action, tuple) and action[0] == "tmute"
+            ):
+                try:
+                    if isinstance(action, tuple) and action[0] == "tmute":
+                        _, duration_str = action
+                        seconds = parse_time_to_seconds(duration_str)
+                        if seconds <= 0:
+                            seconds = 1800
+                        until_date = datetime.utcnow() + timedelta(seconds=seconds)
+                        await message.chat.restrict_member(
+                            sender_id,
+                            permissions=PTBChatPermissions(can_send_messages=False),
+                            until_date=until_date,
+                        )
+                        temp_mutes[sender_id] = (chat_id, int(time.time()) + seconds)
+                        mute_type = f"temporarily muted for {duration_str}"
+                    elif action == "tmute":
+                        seconds = 1800
+                        until_date = datetime.utcnow() + timedelta(seconds=seconds)
+                        await message.chat.restrict_member(
+                            sender_id,
+                            permissions=PTBChatPermissions(can_send_messages=False),
+                            until_date=until_date,
+                        )
+                        temp_mutes[sender_id] = (chat_id, int(time.time()) + seconds)
+                        mute_type = "temporarily muted for 30m"
+                    else:
+                        await message.chat.restrict_member(
+                            sender_id,
+                            permissions=PTBChatPermissions(can_send_messages=False),
+                        )
+                        mute_type = "muted"
+
+                    await update.effective_chat.send_message(
+                        f"{reason_text}has been {mute_type}.\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
                         parse_mode=ParseMode.HTML,
                     )
                 except Exception as e:
-                    await message.reply_text(f"Failed to mute user: {e}")
+                    await update.effective_chat.send_message(f"Failed to mute user: {e}")
+
             elif action == "ban":
                 try:
                     await message.chat.ban_member(sender_id)
-                    await message.reply_text(
-                        f"{message.from_user.mention_html()} banned.",
+                    await update.effective_chat.send_message(
+                        f"{reason_text}banned.\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
                         parse_mode=ParseMode.HTML,
                     )
                 except Exception as e:
-                    await message.reply_text(f"Failed to ban user: {e}")
+                    await update.effective_chat.send_message(f"Failed to ban user: {e}")
+
             elif action == "kick":
                 try:
                     await message.chat.ban_member(sender_id)
                     await message.chat.unban_member(sender_id)
-                    await message.reply_text(
-                        f"{message.from_user.mention_html()} kicked.",
+                    await update.effective_chat.send_message(
+                        f"{reason_text}kicked.\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
                         parse_mode=ParseMode.HTML,
                     )
                 except Exception as e:
-                    await message.reply_text(f"Failed to kick user: {e}")
+                    await update.effective_chat.send_message(f"Failed to kick user: {e}")
+
             elif action == "delete":
-                try:
-                    await message.delete()
-                except Exception as e:
-                    await message.reply_text(f"Failed to delete message: {e}")
+                await update.effective_chat.send_message(
+                    f"Deleted message from {reason_text}\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
+                    parse_mode=ParseMode.HTML,
+                )
 
     # === AFK Logic ===
-    # Remove AFK status if sender was AFK
     if sender_id in afk_users:
         afk_data = afk_users.pop(sender_id)
         duration = datetime.utcnow() - afk_data["time"]
@@ -2477,20 +2733,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     file = await context.bot.get_file(afk_data["media"])
                     sticker_bytes = await file.download_as_bytearray()
                     image_obj = Image.open(BytesIO(sticker_bytes)).convert("RGBA")
-
-                    # Create black background
-                    bg = Image.new("RGBA", image_obj.size, (0, 0, 0, 255))  # solid black
-
-                    # Paste sticker on black background (respect transparency)
+                    bg = Image.new("RGBA", image_obj.size, (0, 0, 0, 255))
                     bg.paste(image_obj, (0, 0), image_obj)
-
                     bio = BytesIO()
                     bio.name = "sticker.png"
                     bg.save(bio, "PNG")
                     bio.seek(0)
-
                     await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode="Markdown")
-
                 else:
                     await message.reply_text(text, parse_mode="Markdown")
             else:
@@ -2498,16 +2747,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             await message.reply_text(text, parse_mode="Markdown")
 
-
-
-    # Notify if mentioned or replied users are AFK with media support
     mentioned_ids = set()
     if message.entities:
         for ent in message.entities:
             if ent.type == "text_mention" and ent.user:
                 mentioned_ids.add(ent.user.id)
             elif ent.type == "mention":
-                username = message.text[ent.offset : ent.offset + ent.length]  # includes '@'
+                username = message.text[ent.offset: ent.offset + ent.length]
                 for afk_id in afk_users.keys():
                     user = await context.bot.get_chat(afk_id)
                     if user.username and username.lower() == f"@{user.username.lower()}":
@@ -2533,7 +2779,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 duration_parts.append(f"{seconds}s")
             duration_str = " ".join(duration_parts) or "moments"
             user_chat = await context.bot.get_chat(uid)
-            user_chat = await context.bot.get_chat(uid)
             display_name = get_full_name(user_chat)
             text = f"[{display_name}](tg://user?id={uid}) is AFK since {duration_str}."
 
@@ -2547,20 +2792,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         file = await context.bot.get_file(afk_data["media"])
                         sticker_bytes = await file.download_as_bytearray()
                         image_obj = Image.open(BytesIO(sticker_bytes)).convert("RGBA")
-
-                        # Create black background
-                        bg = Image.new("RGBA", image_obj.size, (0, 0, 0, 255))  # solid black
-
-                        # Paste sticker on black background (respect transparency)
+                        bg = Image.new("RGBA", image_obj.size, (0, 0, 0, 255))
                         bg.paste(image_obj, (0, 0), image_obj)
-
                         bio = BytesIO()
                         bio.name = "sticker.png"
                         bg.save(bio, "PNG")
                         bio.seek(0)
-
                         await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode="Markdown")
-
                     else:
                         await message.reply_text(text, parse_mode="Markdown")
                 else:
@@ -2568,17 +2806,14 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 await message.reply_text(text, parse_mode="Markdown")
 
-        # ---- NIGHTMODE ENFORCEMENT ----
+    # ---- NIGHTMODE ENFORCEMENT ----
     ist = pytz.timezone("Asia/Kolkata")
     now = datetime.now(ist).time()
-
-    if nightmode_status.get(chat_id, False):  # if enabled
+    if nightmode_status.get(chat_id, False):
         night_start = dtime(23, 0)
         night_end = dtime(7, 0)
         in_night = (now >= night_start or now <= night_end)
-
         if in_night and not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
-            # allow only text
             if not message.text:
                 try:
                     await message.delete()
@@ -2586,10 +2821,27 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 return
 
+async def has_permission_pyro(client, message: Message, perms: list[str]) -> bool:
+    member = await client.get_chat_member(message.chat.id, message.from_user.id)
+
+    if member.status == "creator":
+        return True
+
+    if member.status == "administrator":
+        if hasattr(member, "privileges") and member.privileges:
+            return all(getattr(member.privileges, p, False) for p in perms)
+        return all(getattr(member, p, False) for p in perms)
+
+    return False
+
 
 
 @pyro_client.on_message(filters.command("unmuteall") & filters.group)
 async def unmute_all(client, message: Message):
+    if not await has_permission_pyro(client, message, ["can_restrict_members"]):
+        return await message.reply_text("🚫 You need 'Can Restrict Members' permission to use mute commands.")
+
+
     if not await is_admin_pyro(client, message.chat.id, message.from_user.id):
         return await message.reply_text("🚫 Only admins can use this command.")
 
@@ -2772,6 +3024,9 @@ async def resolve_username_to_user(username: str, context):
 
 
 async def mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_restrict_members"]):
+        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use mute commands.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be an admin to mute users.")
         return
@@ -2801,6 +3056,9 @@ def get_full_name(user):
 
 
 async def unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_restrict_members"]):
+        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use mute commands.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be admin to unmute users.")
         return
@@ -2857,6 +3115,9 @@ async def user_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def kick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_restrict_members"]):
+        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to kick users.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be an admin to kick users.")
         return
@@ -2905,6 +3166,9 @@ def parse_time_to_seconds(time_str: str) -> int:
 
 
 async def tmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_restrict_members"]):
+        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use mute commands.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be an admin to temp mute users.")
         return
@@ -3082,6 +3346,9 @@ async def stop_tagall(update, context):
 
 
 async def pin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_pin_messages"]):
+        return await update.message.reply_text("🚫 You need 'Can Pin Messages' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be an admin to pin messages.")
         return
@@ -3095,6 +3362,9 @@ async def pin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {e}")
 
 async def unpin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_pin_messages"]):
+        return await update.message.reply_text("🚫 You need 'Can Pin Messages' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("Only admins can unpin messages.")
         return
@@ -3119,6 +3389,9 @@ async def unpin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def purge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_delete_messages"]):
+        return await update.message.reply_text("🚫 You need 'Can Delete Messages' permission to use this command.")
+
     if not update.message.reply_to_message:
         await update.message.reply_text("Reply to a message to start purging.")
         return
@@ -3815,6 +4088,9 @@ async def nightmode_end(context: ContextTypes.DEFAULT_TYPE):
 # --- NEW COMMANDS ---
 
 async def unapproveall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info"]):
+        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to use this command.")
+
     if not await is_admin(update, update.message.from_user.id):
         return await update.message.reply_text("🚫 Only admins can clear approvals.")
     chat_id = update.effective_chat.id
@@ -3825,6 +4101,9 @@ async def unapproveall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ℹ️ No approved users found in this chat.")
 
 async def approved(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info"]):
+        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to use this command.")
+
     chat_id = update.effective_chat.id
     if chat_id not in approved_users or not approved_users[chat_id]:
         return await update.message.reply_text("ℹ️ No users are approved in this chat.")
@@ -3838,12 +4117,18 @@ async def approved(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 async def unblacklistall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_change_info", "can_delete_messages"]):
+        return await update.message.reply_text("🚫 You need both 'Can Change Info' and 'Can Delete Messages' permissions.")
+
     if not await is_admin(update, update.message.from_user.id):
         return await update.message.reply_text("🚫 Only admins can clear blacklist.")
     blacklist.clear()
     await update.message.reply_text("✅ All blacklist words have been removed.")
 
 async def warns(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await has_permission(update, ["can_restrict_members"]):
+        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use this command.")
+
     user = await resolve_user(update, context)
     if not user:
         return
@@ -4274,7 +4559,7 @@ async def start_bots():
         # --- PTB Application ---
         application = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).build()
 
-        # === Register handlers (all your existing handlers) ===
+        # Register all handlers here (already present in your code)
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("info", info))
@@ -4325,8 +4610,10 @@ async def start_bots():
         application.add_handler(CommandHandler("pp", pp_command))
         application.add_handler(CommandHandler("calc", calc_command))
         application.add_handler(CommandHandler("report", report_command))
+        application.add_handler(CommandHandler("anime", anime_command))
         application.add_handler(CallbackQueryHandler(anime_callback, pattern="^anime_"))
         application.add_handler(CommandHandler("ud", ud_command))
+        application.add_handler(CommandHandler("nightmode", nightmode_command))
         application.add_handler(CallbackQueryHandler(nightmode_callback, pattern=r"^nightmode_(on|off):-?\d+$"))
         application.add_handler(CommandHandler("resetwarns", resetwarns))
         application.add_handler(CommandHandler("rmwarn", rmwarn))
@@ -4346,6 +4633,8 @@ async def start_bots():
         application.add_handler(CommandHandler("send", send_command))
         application.add_handler(CommandHandler("character", character_command))
         application.add_handler(CallbackQueryHandler(character_callback, pattern="^char_"))
+        application.add_handler(CommandHandler("unfilterall", unfilterall))
+        application.add_handler(CallbackQueryHandler(blacklist_callback, pattern=r"^bl_"))
 
         # === Background tasks ===
         asyncio.create_task(unmute_expired_task(application))
@@ -4385,7 +4674,5 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
-
 
 
