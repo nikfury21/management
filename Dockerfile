@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     fonts-dejavu-core \
     fonts-freefont-ttf \
+    fonts-unifont \
+    fonts-ubuntu \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (for caching)
