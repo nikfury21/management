@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
     fonts-dejavu-core \
     fonts-freefont-ttf \
     fonts-unifont \
-    fonts-ubuntu \
+    fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (for caching)
