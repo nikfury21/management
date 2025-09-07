@@ -14,6 +14,18 @@ RUN apt-get update && apt-get install -y \
     fonts-freefont-ttf \
     fonts-unifont \
     fonts-noto-core \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (for caching)
@@ -22,8 +34,8 @@ COPY requirements.txt .
 # Upgrade pip and install Python dependencies
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright Chromium with all required deps
-RUN playwright install --with-deps chromium
+# Install Playwright Chromium only (skip --with-deps to avoid broken fonts)
+RUN playwright install chromium
 
 # Copy the rest of the code
 COPY . .
