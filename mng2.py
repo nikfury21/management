@@ -1,12 +1,18 @@
-import sys
-import asyncio
-
 import sys, asyncio
 
 if sys.platform.startswith("win"):
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+import sys
+import asyncio
+from pyrogram.enums import ChatMemberStatus
+import sys, asyncio
 
 
+
+
+import requests
+from requests.exceptions import Timeout, RequestException
 import logging
 import random
 from telegram import Update, ChatPermissions as PTBChatPermissions
@@ -162,7 +168,8 @@ ongoing_tagall = {}
 afk_users = {}
 waifu_data = {}  
 WAIFU_EXPIRY_SECONDS = 86400
-warnings = {}           
+warnings = {}    
+warn_reasons = {}   # {user_id: [reasons]}
 blacklist = set()       
 approved_users = set()  
 filters_dict = {}              
@@ -539,6 +546,226 @@ async def prepare_animated(bot, file_id):
     bio = BytesIO(file_bytes)
     bio.name = "sticker.tgs"
     return bio
+
+
+
+
+# --- Store chat-wise settings ---
+editdelete_enabled = {}  # chat_id -> bool
+edit_message_jobs = {}  # {(chat_id, message_id): job} to track scheduled deletions
+
+
+async def has_permission(update, perms):
+    """
+    Utility already used in your code.
+    Checks if the user has the required admin permissions.
+    """
+    try:
+        member = await update.effective_chat.get_member(update.effective_user.id)
+        for perm in perms:
+            if not getattr(member, perm, False):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+
+
+from telethon.tl.functions.channels import GetParticipantsRequest
+from telethon.tl.types import ChannelParticipantsSearch
+
+@pyro_client.on_message(pyro_filters.command("zombies"))
+async def zombies(client, message):
+    # Admin-only
+    if not await is_admin_pyro(client, message.chat.id, message.from_user.id):
+        return await message.reply_text("🚫 Only admins can use this command.")
+
+    chat_id = message.chat.id
+    deleted_ids = set()
+
+    # Iterate only current members; skip LEFT/BANNED to avoid false positives
+    async for member in client.get_chat_members(chat_id):
+        u = member.user
+        if not u:
+            continue
+        if member.status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED):
+            continue
+        if getattr(u, "is_deleted", False):
+            deleted_ids.add(u.id)
+
+    if not deleted_ids:
+        return await message.reply_text("No deleted accounts found in this chat.")
+
+    ids_str = ", ".join(str(uid) for uid in sorted(deleted_ids))
+    await message.reply_text(f"Deleted accounts: {ids_str}\nTotal: {len(deleted_ids)}")
+
+
+@pyro_client.on_message(pyro_filters.command("rzombies"))
+async def rzombies(client, message):
+    # Admin-only
+    if not await is_admin_pyro(client, message.chat.id, message.from_user.id):
+        return await message.reply_text("🚫 Only admins can use this command.")
+
+    chat_id = message.chat.id
+    removed_count = 0
+    skipped_admin = 0
+
+    async for member in client.get_chat_members(chat_id):
+        u = member.user
+        if not u:
+            continue
+        if member.status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED):
+            continue
+        if getattr(u, "is_deleted", False):
+            if await is_admin_pyro(client, chat_id, u.id):
+                skipped_admin += 1
+                continue
+            try:
+                await client.ban_chat_member(chat_id, u.id)
+                await client.unban_chat_member(chat_id, u.id)
+                removed_count += 1
+            except ChatAdminRequired:
+                return await message.reply_text("🚫 I don't have permission to remove members.")
+            except Exception:
+                continue
+
+    await message.reply_text(
+        f"Removed {removed_count} deleted accounts. Skipped {skipped_admin} (admins)."
+    )
+
+
+
+
+async def edited_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle edited messages and schedule deletion if enabled (Consolidated)"""
+    print(f"[DEBUG] Edited message handler called, update type: {type(update)}")
+    print(f"[DEBUG] Has edited_message: {bool(update.edited_message)}")
+    
+    if not update.edited_message:
+        print(f"[DEBUG] No edited_message found in update")
+        return 
+
+    msg = update.edited_message
+
+    # 🚫 Skip whispers/system edits: if message has inline buttons, skip
+    if msg.reply_markup and msg.reply_markup.inline_keyboard:
+        print(f"[DEBUG] Skipping edit with inline buttons (likely whisper) for msg {msg.message_id}")
+        return
+
+    chat = msg.chat
+    chat_id = chat.id
+    message_id = msg.message_id
+    user = msg.from_user
+    user_id = user.id if user else None
+    
+    print(f"[DEBUG] Edited message - Chat: {chat_id}, Message: {message_id}, User: {user_id}")
+    print(f"[DEBUG] Edit-delete enabled states: {editdelete_enabled}")
+    
+    # Check if edit-delete is enabled in this chat
+    is_enabled = editdelete_enabled.get(chat_id, False)
+    print(f"[DEBUG] Edit-delete enabled for chat {chat_id}: {is_enabled}")
+    
+    if not is_enabled:
+        print(f"[DEBUG] Edit-delete not enabled for this chat, returning")
+        return
+    
+    # Skip if no user_id (shouldn't happen but safety check)
+    if not user_id:
+        print(f"[DEBUG] No user_id found, returning")
+        return
+
+    # ✅ Ignore admins and owner
+    try:
+        member = await chat.get_member(user_id)
+        if member.status in ("administrator", "creator"):
+            print(f"[DEBUG] Skipping edit deletion for admin/owner {user_id} in chat {chat_id}")
+            return
+    except Exception as e:
+        print(f"[DEBUG] Error checking member status for {user_id}: {e}")
+        return
+    
+    print(f"[DEBUG] Processing edited message - scheduling deletion")
+    
+    # Cancel any existing deletion job for this message
+    existing_job = edit_message_jobs.pop((chat_id, message_id), None)
+    if existing_job:
+        print(f"[DEBUG] Cancelled existing job for message {message_id}")
+        existing_job.schedule_removal()
+    
+    # Schedule new deletion job after 30 seconds
+    try:
+        job = context.job_queue.run_once(
+            delete_edited_message,
+            when=30,
+            data=(chat_id, message_id),
+            name=f"delete_edited_{chat_id}_{message_id}"
+        )
+        
+        edit_message_jobs[(chat_id, message_id)] = job
+        print(f"[DEBUG] Scheduled deletion job for message {message_id} in 30 seconds")
+        
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"<a href='tg://user?id={user_id}'>{user.first_name}</a> edited their message. It will be deleted in 30 seconds!",
+                reply_to_message_id=message_id,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            print(f"[DEBUG] Failed to send confirmation message: {e}")
+        
+    except Exception as e:
+        print(f"[DEBUG] Error scheduling deletion job: {e}")
+
+
+async def editdelete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /editdelete on/off command"""
+    # Use the same permission check as other commands
+    if not await has_permission(update, ["can_change_info"]):
+        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to use this command.")
+    
+    if not context.args or context.args[0].lower() not in ["on", "off"]:
+        return await update.message.reply_text("Usage: /editdelete on|off")
+    
+    chat_id = update.effective_chat.id
+    enabled = context.args[0].lower() == "on"
+    editdelete_enabled[chat_id] = enabled
+    
+    status = "enabled" if enabled else "disabled"
+    print(f"[DEBUG] Edit-delete {status} in chat {chat_id}")
+    await update.message.reply_text(f"✅ Edit-delete feature {status} in this chat.")
+
+
+async def delete_edited_message(context: ContextTypes.DEFAULT_TYPE):
+    """Callback function to delete an edited message after 30 seconds"""
+    job = context.job
+    chat_id, message_id = job.data
+    
+    print(f"[DEBUG] delete_edited_message callback triggered for message {message_id} in chat {chat_id}")
+    
+    try:
+        print(f"[DEBUG] Attempting to delete message {message_id} in chat {chat_id}")
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        print(f"[DEBUG] Successfully deleted message {message_id} in chat {chat_id}")
+    except Exception as e:
+        # Message might already be deleted or not accessible
+        print(f"[DEBUG] Failed to delete edited message {message_id} in chat {chat_id}: {e}")
+    
+    # Remove the job from tracking
+    edit_message_jobs.pop((chat_id, message_id), None)
+    print(f"[DEBUG] Removed job tracking for message {message_id} in chat {chat_id}")
+
+
+import asyncio
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
+from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes
+
+
+
+
+
 
 async def character_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -1439,56 +1666,43 @@ async def setfloodmode(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def take_flood_action(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, action, duration="30m"):
     chat_id = update.effective_chat.id
-    user = await context.bot.get_chat(user_id)
-    name = format_name(user)
+    user = update.effective_user if update.effective_user.id == user_id else None
+    name = format_name(user) if user else str(user_id)
+    now = int(time.time())
 
-    # ✅ Check if already restricted (prevents duplicate mute messages)
-    member = await context.bot.get_chat_member(chat_id, user_id)
-    if member.can_send_messages is False and action in ["mute", "tmute"]:
-        return  # already muted, skip
+    # --- Prevent duplicate actions ---
+    if action == "tmute" and user_id in temp_mutes:
+        mute_chat, unmute_time = temp_mutes[user_id]
+        if mute_chat == chat_id and now < unmute_time:
+            return
 
     if action == "kick":
-        try:
-            await update.effective_chat.ban_member(user_id)
-            await update.effective_chat.unban_member(user_id)
-            await context.bot.send_message(chat_id=chat_id, text=f"👢 Kicked {name} for flooding.")
-        except Exception as e:
-            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Error kicking flooder: {e}")
+        await update.effective_chat.ban_member(user_id)
+        await update.effective_chat.unban_member(user_id)
+        await context.bot.send_message(chat_id, f"👢 Kicked {name} for flooding.")
+        return
 
-    elif action == "ban":
-        try:
-            await update.effective_chat.ban_member(user_id)
-            await context.bot.send_message(chat_id=chat_id, text=f"⛔ Banned {name} for flooding.")
-        except Exception as e:
-            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Error banning flooder: {e}")
+    if action == "ban":
+        await update.effective_chat.ban_member(user_id)
+        await context.bot.send_message(chat_id, f"⛔ Banned {name} for flooding.")
+        return
 
-    elif action == "mute":
-        try:
-            await update.effective_chat.restrict_member(
-                user_id,
-                permissions=PTBChatPermissions(can_send_messages=False)
-            )
-            await context.bot.send_message(chat_id=chat_id, text=f"🔇 Muted {name} for flooding.")
-        except Exception as e:
-            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Error muting flooder: {e}")
+    if action == "mute":
+        await update.effective_chat.restrict_member(user_id, permissions=PTBChatPermissions(can_send_messages=False))
+        await context.bot.send_message(chat_id, f"🔇 Muted {name} for flooding.")
+        return
 
-    elif action == "tmute":
+    if action == "tmute":
         seconds = parse_time_to_seconds(duration)
-        try:
-            await update.effective_chat.restrict_member(
-                user_id,
-                permissions=PTBChatPermissions(can_send_messages=False),
-                until_date=int(time.time()) + seconds
-            )
-            unmute_time = int(time.time()) + seconds
-            temp_mutes[user_id] = (chat_id, unmute_time)
-
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"⏳ Temporarily muted {name} for flooding ({duration})."
-            )
-        except Exception as e:
-            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Error temp muting flooder: {e}")
+        until = now + seconds
+        await update.effective_chat.restrict_member(
+            user_id,
+            permissions=PTBChatPermissions(can_send_messages=False),
+            until_date=until
+        )
+        temp_mutes[user_id] = (chat_id, until)
+        await context.bot.send_message(chat_id, f"⏳ Temporarily muted {name} for flooding ({duration}).")
+        return
 
 
 async def get_all_members(chat_id):
@@ -1624,7 +1838,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/pp- search for the photo and gives description about it",
         "/calc- calculates anything",
         "/report- report to admins",
-        "/unmuteall- unmute all members of group",
         "/nightmode- deletes non-text messages of unapproved and non admin users",
         "/ud- tells meaning of the wprd",
         "/rmwarn- remove one warning of user",
@@ -1641,6 +1854,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/freelist- shows all freed user",
         "/character- get a overview of any anime character",
         "/unfilterall- removes all filters",
+        "/zombies- show total deleted accounts in group",
+        "/rzombies- remove all deleted accounts"
+        "/editdelete - deletes all edited message after 30s"
 
     ]
     
@@ -1794,26 +2010,47 @@ async def warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use this command.")
 
     if not await is_admin(update, update.message.from_user.id):
-        await update.message.reply_text("You must be an admin to warn users.")
-        return
+        return await update.message.reply_text("You must be an admin to warn users.")
+
     user = await resolve_user(update, context)
     if not user:
         return
-    if await is_member_admin(update.effective_chat, user.id):
-        await update.message.reply_text("I cannot warn an admin!")
-        return
 
+    # don't allow warning admins
+    if await is_member_admin(update.effective_chat, user.id):
+        return await update.message.reply_text("I cannot warn an admin!")
+
+    # extract reason
+    reason = " ".join(context.args[1:]) if context.args else ""
+    if update.message.text and update.message.text.strip() != "/warn":
+        parts = update.message.text.split(maxsplit=2)
+        if len(parts) >= 3:
+            reason = parts[2]
+    if not reason:
+        reason = "No reason given"
+
+    # update warnings
     count = warnings.get(user.id, 0) + 1
     warnings[user.id] = count
+    warn_reasons.setdefault(user.id, []).append(reason)
+
     if count < 3:
-        await update.message.reply_text(f"{format_name(user)} warned: {count}/3 warnings.")
+        await update.message.reply_text(
+            f"<a href='tg://user?id={user.id}'>{format_name(user)}</a> warned: {count}/3 warnings.\nReason: {reason}",
+            parse_mode="HTML"
+        )
     else:
         try:
             await update.effective_chat.ban_member(user.id)
-            await update.message.reply_text(f"{format_name(user)} has been banned after 3 warnings.")
+            await update.message.reply_text(
+                f"<a href='tg://user?id={user.id}'>{format_name(user)}</a> has been banned after 3 warnings.",
+                parse_mode="HTML"
+            )
             warnings[user.id] = 0
+            warn_reasons[user.id] = []
         except BadRequest as e:
             await update.message.reply_text(f"Couldn't ban user: {e}")
+
 
 async def resetwarns(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await has_permission(update, ["can_restrict_members"]):
@@ -1866,7 +2103,7 @@ async def rmwarn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     count = warnings.get(user.id, 0)
     if count > 0:
         warnings[user.id] = count - 1
-        await update.message.reply_text(f"One warning removed from {format_name(user)}. Total warns: {warnings[user.id]}/3.")
+        await update.message.reply_text(f"One warning removed from {format_name(user)}. \nTotal warns: {warnings[user.id]}/3.")
     else:
         await update.message.reply_text(f"{format_name(user)} has no warnings.")
 
@@ -2366,26 +2603,122 @@ async def unfilterall(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-async def has_permission(update: Update, perms: list[str]) -> bool:
-    chat = update.effective_chat
-    user = update.effective_user
-    member = await chat.get_member(user.id)
+async def has_permission(update: Update, permissions: list[str]) -> bool:
+    """
+    Check if the user who issued the command has all required permissions.
+    """
+    try:
+        chat = update.effective_chat
+        user = update.effective_user
+        member = await chat.get_member(user.id)
 
-    # Creator always has all permissions
-    if member.status == "creator":
-        return True
+        # Group creator always has all permissions
+        if member.status == "creator":
+            return True
 
-    # For administrators
-    if member.status == "administrator":
-        # In PTB 20+, privileges is the right field
-        if hasattr(member, "privileges") and member.privileges:
-            return all(getattr(member.privileges, p, False) for p in perms)
+        if member.status != "administrator":
+            return False
 
-        # Fallback: check attributes directly
-        return all(getattr(member, p, False) for p in perms)
+        # Now check specific admin rights
+        admin_perms = member.can_manage_chat, member.can_delete_messages, member.can_restrict_members, member.can_promote_members, member.can_change_info, member.can_invite_users, member.can_pin_messages
 
-    # Normal members → no extra rights
-    return False
+        # Map Telegram permissions to attributes
+        perm_map = {
+            "can_manage_chat": member.can_manage_chat,
+            "can_delete_messages": member.can_delete_messages,
+            "can_restrict_members": member.can_restrict_members,
+            "can_promote_members": member.can_promote_members,
+            "can_change_info": member.can_change_info,
+            "can_invite_users": member.can_invite_users,
+            "can_pin_messages": member.can_pin_messages,
+        }
+
+        return all(perm_map.get(p, False) for p in permissions)
+
+    except Exception as e:
+        print(f"[has_permission error] {e}")
+        return False
+
+
+async def edited_message_handler_v2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle edited messages and schedule deletion if enabled - V2"""
+    print(f"[DEBUG] Edited message handler V2 called, update type: {type(update)}")
+    print(f"[DEBUG] Has edited_message: {bool(update.edited_message)}")
+    
+    if not update.edited_message:
+        print(f"[DEBUG] No edited_message found in update")
+        return
+
+    msg = update.edited_message
+
+    # 🚫 Skip whispers/system edits: if message has inline buttons, skip
+    if msg.reply_markup and msg.reply_markup.inline_keyboard:
+        print(f"[DEBUG] Skipping edit with inline buttons (likely whisper) for msg {msg.message_id}")
+        return
+
+    chat = msg.chat
+    chat_id = chat.id
+    message_id = msg.message_id
+    user = msg.from_user
+    user_id = user.id if user else None
+    
+    print(f"[DEBUG] Edited message - Chat: {chat_id}, Message: {message_id}, User: {user_id}")
+    print(f"[DEBUG] Edit-delete enabled states: {editdelete_enabled}")
+    
+    # Check if edit-delete is enabled in this chat
+    is_enabled = editdelete_enabled.get(chat_id, False)
+    print(f"[DEBUG] Edit-delete enabled for chat {chat_id}: {is_enabled}")
+    
+    if not is_enabled:
+        print(f"[DEBUG] Edit-delete not enabled for this chat, returning")
+        return
+    
+    # Skip if no user_id (shouldn't happen but safety check)
+    if not user_id:
+        print(f"[DEBUG] No user_id found, returning")
+        return
+
+    # ✅ Ignore admins and owner
+    try:
+        member = await chat.get_member(user_id)
+        if member.status in ("administrator", "creator"):
+            print(f"[DEBUG] Skipping edit deletion for admin/owner {user_id} in chat {chat_id}")
+            return
+    except Exception as e:
+        print(f"[DEBUG] Error checking member status for {user_id}: {e}")
+        return
+    
+    print(f"[DEBUG] Processing edited message - scheduling deletion")
+    
+    # Cancel any existing deletion job for this message
+    existing_job = edit_message_jobs.pop((chat_id, message_id), None)
+    if existing_job:
+        print(f"[DEBUG] Cancelled existing job for message {message_id}")
+        existing_job.schedule_removal()
+    
+    # Schedule new deletion job after 30 seconds
+    try:
+        job = context.job_queue.run_once(
+            delete_edited_message,
+            when=30,
+            data=(chat_id, message_id),
+            name=f"delete_edited_{chat_id}_{message_id}"
+        )
+        
+        edit_message_jobs[(chat_id, message_id)] = job
+        print(f"[DEBUG] Scheduled deletion job for message {message_id} in 30 seconds")
+        
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⏱️ Edit detected! Message will be deleted in 30 seconds.",
+                reply_to_message_id=message_id
+            )
+        except Exception as e:
+            print(f"[DEBUG] Failed to send confirmation message: {e}")
+        
+    except Exception as e:
+        print(f"[DEBUG] Error scheduling deletion job: {e}")
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2571,18 +2904,26 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Flood Protection
     flood_limit = flood_settings.get(chat_id)
     flood_mode = flood_modes.get(chat_id, default_flood_mode)
+
     if flood_limit and not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
         key = (chat_id, sender_id)
-        last_count, last_msg_id = user_flood_counts.get(key, (0, None))
-        if last_msg_id and message.message_id == last_msg_id + 1:
+        last_count, last_time = user_flood_counts.get(key, (0, 0))  # store timestamp, not msg_id
+        now = time.time()
+
+        # If messages are within 5 seconds → count as spam
+        if now - last_time <= 5:
             curr_count = last_count + 1
         else:
             curr_count = 1
-        user_flood_counts[key] = (curr_count, message.message_id)
+
+        user_flood_counts[key] = (curr_count, now)  # save timestamp instead of message_id
+
         if curr_count >= flood_limit:
             action, duration = flood_mode
+            user_flood_counts[key] = (0, 0)  # reset first to avoid double trigger
             await take_flood_action(update, context, sender_id, action, duration)
-            user_flood_counts[key] = (0, None)
+
+
 
     # ---- Blacklist Check (words + stickers + packs) ----
     if not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
@@ -2721,7 +3062,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         duration_str = " ".join(duration_parts) or "moments"
         user_chat = await context.bot.get_chat(sender_id)
         display_name = get_full_name(user_chat)
-        text = f"[{display_name}](tg://user?id={sender_id}) is back online after {duration_str}."
+        text = f"[{display_name}](tg://user?id={sender_id}) Is now back online and they were afk for {duration_str}."
 
         if afk_data.get("reason") and afk_data["reason"] != "None":
             text += f"\nReason: {afk_data['reason']}"
@@ -2835,35 +3176,6 @@ async def has_permission_pyro(client, message: Message, perms: list[str]) -> boo
     return False
 
 
-
-@pyro_client.on_message(filters.command("unmuteall") & filters.group)
-async def unmute_all(client, message: Message):
-    if not await has_permission_pyro(client, message, ["can_restrict_members"]):
-        return await message.reply_text("🚫 You need 'Can Restrict Members' permission to use mute commands.")
-
-
-    if not await is_admin_pyro(client, message.chat.id, message.from_user.id):
-        return await message.reply_text("🚫 Only admins can use this command.")
-
-    try:
-        await client.set_chat_permissions(
-            message.chat.id,
-            PTBChatPermissions(
-                can_send_messages=True,
-                can_send_media_messages=True,
-                can_send_polls=True,
-                can_send_other_messages=True,
-                can_add_web_page_previews=True,
-                can_change_info=False,
-                can_invite_users=True,
-                can_pin_messages=False
-            )
-        )
-        await message.reply_text("✅ All members have been unmuted.")
-    except ChatNotModified:
-        await message.reply_text("✅ All members are already unmuted.")
-    except Exception as e:
-        await message.reply_text(f"❌ Error: {e}")
 
 
 
@@ -3589,7 +3901,7 @@ async def afk_command(update, context):
         "media_type": afk_media_type,
     }
 
-    text = f"[{user.first_name}](tg://user?id={user.id}) is now AFK"
+    text = f"[{user.first_name}](tg://user?id={user.id}) Is now away from keyboard! Sayonara!"
     if reason and reason != "None":
         text += f"\nReason: {reason}"
 
@@ -4088,17 +4400,23 @@ async def nightmode_end(context: ContextTypes.DEFAULT_TYPE):
 # --- NEW COMMANDS ---
 
 async def unapproveall(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await has_permission(update, ["can_change_info"]):
-        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to use this command.")
+    chat = update.effective_chat
+    user = update.effective_user
 
-    if not await is_admin(update, update.message.from_user.id):
-        return await update.message.reply_text("🚫 Only admins can clear approvals.")
-    chat_id = update.effective_chat.id
+    # Fetch member info
+    member = await context.bot.get_chat_member(chat.id, user.id)
+
+    # Only group owner can use
+    if member.status != "creator":
+        return await update.message.reply_text("🚫 Only the group owner can use this command.")
+
+    chat_id = chat.id
     if chat_id in approved_users:
         approved_users[chat_id].clear()
         await update.message.reply_text("✅ All approved users have been unapproved.")
     else:
         await update.message.reply_text("ℹ️ No approved users found in this chat.")
+
 
 async def approved(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await has_permission(update, ["can_change_info"]):
@@ -4116,24 +4434,63 @@ async def approved(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"• {uid}\n"
     await update.message.reply_text(text)
 
-async def unblacklistall(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await has_permission(update, ["can_change_info", "can_delete_messages"]):
-        return await update.message.reply_text("🚫 You need both 'Can Change Info' and 'Can Delete Messages' permissions.")
+from telegram.constants import ChatMemberStatus
 
-    if not await is_admin(update, update.message.from_user.id):
-        return await update.message.reply_text("🚫 Only admins can clear blacklist.")
+async def unblacklistall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    chat = update.effective_chat
+
+    # Check if user is group owner
+    member = await chat.get_member(user_id)
+    if member.status != ChatMemberStatus.OWNER:
+        return await update.message.reply_text("🚫 Only the group owner can use this command.")
+
+    # Clear blacklist
     blacklist.clear()
-    await update.message.reply_text("✅ All blacklist words have been removed.")
+    await update.message.reply_text("✅ All blacklist words have been removed by the group owner.")
+
 
 async def warns(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await has_permission(update, ["can_restrict_members"]):
-        return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use this command.")
+    user = None
 
-    user = await resolve_user(update, context)
+    # 1. Try to resolve target user if mentioned/replied
+    if update.message.reply_to_message or context.args:
+        user = await resolve_user(update, context)
+
+    # 2. If no user mentioned → fallback to self
     if not user:
-        return
+        user = update.effective_user
+        if await is_member_admin(update.effective_chat, user.id):
+            return await update.message.reply_text(
+                "As per You are admin.. You don't have any warnings!"
+            )
+
+    # 3. If mentioned user is admin
+    if await is_member_admin(update.effective_chat, user.id):
+        return await update.message.reply_text(
+            f"<a href='tg://user?id={user.id}'>{format_name(user)}</a> is admin so they haven't any warnings.",
+            parse_mode="HTML"
+        )
+
+    # 4. Normal user: show warns
     count = warnings.get(user.id, 0)
-    await update.message.reply_text(f"{format_name(user)} has {count}/3 warnings.")
+    reasons = warn_reasons.get(user.id, [])
+
+    if count == 0:
+        return await update.message.reply_text(
+            f"<a href='tg://user?id={user.id}'>{format_name(user)}</a> has no warnings.",
+            parse_mode="HTML"
+        )
+
+    reason_text = "\n".join([f"{i+1}. {r}" for i, r in enumerate(reasons)]) if reasons else "No reasons recorded."
+
+    await update.message.reply_text(
+        f"<a href='tg://user?id={user.id}'>{format_name(user)}</a> has {count}/3 warnings! Be careful!\n\n"
+        f"- Reasons:\n{reason_text}",
+        parse_mode="HTML"
+    )
+
+
 
 
 async def goodbye_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4556,10 +4913,9 @@ async def start_bots():
             await pyro_client.start()
             print("[Pyrogram] Client started")
 
-        # --- PTB Application ---
         application = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).build()
 
-        # Register all handlers here (already present in your code)
+    # Register all handlers here (already present in your code)
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("info", info))
@@ -4635,6 +4991,29 @@ async def start_bots():
         application.add_handler(CallbackQueryHandler(character_callback, pattern="^char_"))
         application.add_handler(CommandHandler("unfilterall", unfilterall))
         application.add_handler(CallbackQueryHandler(blacklist_callback, pattern=r"^bl_"))
+        application.add_handler(CommandHandler("editdelete", editdelete_command))
+        # Register handler specifically for edited messages using update types
+        application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, edited_message_handler, block=False), group=2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         # === Background tasks ===
         asyncio.create_task(unmute_expired_task(application))
