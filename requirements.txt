@@ -1,52 +1,30 @@
-git+https://github.com/prashantsahlot/FrozenGram.git
-py-tgcalls
-yt-dlp
-aiohttp
-flask
-Flask-RESTful
-tgcrypto
-ffmpeg-python
-isodate
-pillow
-psutil
-requests
-python-dotenv
-asyncpg
-pymongo
-aiofiles
-gender-guesser
+# Use Python 3.10 slim image
+FROM python:3.10-slim
 
-# Telegram Bot frameworks
-python-telegram-bot[job-queue]==20.8
-pyrogram==2.0.106
-telethon==1.36.0
-TgCrypto==1.2.5
+# Set work directory
+WORKDIR /app
 
-# AI / API clients
-groq==0.9.0
-google-generativeai==0.7.2
-huggingface-hub==0.24.6
-duckduckgo-search==6.2.5
+# Install system dependencies required by Playwright + ffmpeg + fonts
+RUN apt-get update && apt-get install -y \
+    git \
+    ffmpeg \
+    wget \
+    curl \
+    fonts-dejavu-core \
+    fonts-freefont-ttf \
+    && rm -rf /var/lib/apt/lists/*
 
-# Image & video processing
-numpy==1.26.4
-Pillow==10.4.0
-opencv-python==4.7.0.72
+# Copy requirements first (for caching)
+COPY requirements.txt .
 
+# Upgrade pip and install Python dependencies
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Networking / HTTP
-requests==2.32.3
+# Install Playwright Chromium with all required deps
+RUN playwright install --with-deps chromium
 
-# Rendering (for utils/render.py)
-playwright==1.46.0
+# Copy the rest of the code
+COPY . .
 
-# Timezones & templates
-pytz==2024.2
-jinja2
-
-
-
-
-
-
-
+# Start your bot
+CMD ["python", "mng2.py"]
