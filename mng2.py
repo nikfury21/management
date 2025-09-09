@@ -2194,14 +2194,16 @@ async def memify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     img = Image.open(img_path).convert("RGBA")
     draw = ImageDraw.Draw(img)
 
-    # Font
-    try:
-        font_path = os.path.join("fonts", "impact.ttf")
-        font = ImageFont.truetype(font_path, size=int(img.height / 10))
-    except Exception:
-        font = ImageFont.load_default()
+    # Font: enforce correct path and proportional size
+    font_path = os.path.join("font", "impact.ttf")
+    if not os.path.isfile(font_path):
+        await update.message.reply_text("⚠️ Font file not found. Please ensure 'impact.ttf' is in the 'font/' directory.")
+        return
 
-    # Helper: draw outlined text
+    font_size = int(img.height / 10)  # Same proportional size as local
+    font = ImageFont.truetype(font_path, size=font_size)
+
+    # Helper: draw outlined text centered
     def draw_text_centered(text, y):
         if not text:
             return
@@ -2210,10 +2212,10 @@ async def memify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         x = (img.width - w) / 2
         for dx in [-2, 2]:
             for dy in [-2, 2]:
-                draw.text((x+dx, y+dy), text, font=font, fill="black")
+                draw.text((x + dx, y + dy), text, font=font, fill="black")
         draw.text((x, y), text, font=font, fill="white")
 
-    # Add meme text (NO .upper())
+    # Add meme text (exact as input)
     draw_text_centered(top_text, 10)
     draw_text_centered(bottom_text, img.height - int(img.height / 8))
 
@@ -2232,8 +2234,6 @@ async def memify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Cleanup
     os.remove(img_path)
     os.remove(output_path)
-
-
 
 # === Register commands ===
 
@@ -5303,6 +5303,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
