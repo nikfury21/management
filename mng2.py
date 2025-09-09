@@ -18,12 +18,14 @@ import random
 from telegram import Update, ChatPermissions as PTBChatPermissions
 from telegram.error import BadRequest
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
     MessageHandler,
     filters,
 )
+
 from telegram.constants import ParseMode
 from telethon import TelegramClient
 from telegram import ChatPermissions as PTBChatPermissions
@@ -206,19 +208,18 @@ approved_users = {}
 _state: Dict[str, Dict[str, Set[str]]] = {}
 
 VALID_LOCKS = {
-    "all", "audio", "bots", "buttons", "contact", "document", "egames", "forward",
-    "game", "gif", "info", "invite", "inline", "location", "media", "messages",
-    "text", "other", "photos", "pin", "poll", "previews", "rtl", "stickers",
-    "url", "video", "voice",
+    "all", "audio", "bots", "document", "forward", "gif", "inline", "media", "premiumemoji",
+    "text", "poll", "stickers", "video", "channelforward", "channelmessage", "forwardstory", "forwarduser", "emoji", "gmail", "botlink", "links"
 }
 
 ALIAS = {
-    "text": "messages",
+    "text": "text",
 }
 
 BIDI_FORBIDDEN = { "\u202A", "\u202B", "\u202D", "\u202E", "\u202C", "\u2066", "\u2067", "\u2068", "\u2069", "\u200F" }
 URL_REGEX = re.compile(r"https?://|t\.me/|telegram\.me/|telegram\.dog/|joinchat/", re.IGNORECASE)
 INVITE_REGEX = re.compile(r"t\.me/joinchat/|t\.me/\+|telegram\.me/\+", re.IGNORECASE)
+BOTLINK_REGEX = re.compile(r"t\.me/[A-Za-z0-9_]+bot", re.IGNORECASE)
 
 
 
@@ -360,6 +361,9 @@ def has_invite_link(msg) -> bool:
     text = (msg.text or msg.caption or "")
     return bool(INVITE_REGEX.search(text))
 
+def has_botlink(msg) -> bool:
+    text = (msg.text or msg.caption or "")
+    return bool(BOTLINK_REGEX.search(text))
 
 
 # Load filters at startup
@@ -498,6 +502,12 @@ query ($id: Int) {
 }
 """
 
+def has_premium_emoji(message):
+    entities = (message.entities or []) + (message.caption_entities or [])
+    for ent in entities:
+        if ent.type == "custom_emoji":
+            return True
+    return False
 
 
 async def prepare_static(bot, file_id):
@@ -706,12 +716,21 @@ async def edited_message_handler(update: Update, context: ContextTypes.DEFAULT_T
         print(f"[DEBUG] Scheduled deletion job for message {message_id} in 30 seconds")
         
         try:
-            await context.bot.send_message(
+            warn_msg = await context.bot.send_message(
                 chat_id=chat_id,
                 text=f"<a href='tg://user?id={user_id}'>{user.first_name}</a> edited their message. It will be deleted in 30 seconds!",
                 reply_to_message_id=message_id,
                 parse_mode="HTML"
             )
+
+            # Schedule deletion of the warning message too
+            context.job_queue.run_once(
+                delete_edited_message,
+                when=30,
+                data=(chat_id, warn_msg.message_id),
+                name=f"delete_warning_{chat_id}_{warn_msg.message_id}"
+            )
+
         except Exception as e:
             print(f"[DEBUG] Failed to send confirmation message: {e}")
         
@@ -1178,11 +1197,22 @@ async def unlock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def locks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     locked = get_locked(update.effective_chat.id)
     pretty = "\n".join(
-        [f"• {k} — {'ON' if k in locked else 'OFF'}" for k in sorted(VALID_LOCKS - {"all"})]
+        [
+            f"✘ {k} — {'ON' if k in locked else 'OFF'}"
+            for k in [
+                "audio", "botlink", "bots", "channelforward", "channelmessage",
+                "documents", "emoji", "forward", "forwardstory", "forwarduser",
+                "gif", "gmail", "inline", "links", "media", "poll",
+                "premiumemoji", "stickers", "text", "video", "all"
+            ]
+        ]
     )
+
     await update.message.reply_text(
-        "**Current locks:**\n" + pretty + "\n\nUse /lock <type> or /unlock <type>."
+        "🎼 ᴄᴜʀʀᴇɴᴛ ʟᴏᴄᴋ ᴛʏᴘᴇꜱ\n\n" + pretty,
+        parse_mode="HTML"
     )
+
 
 
 async def is_admin_pyro(client, chat_id, user_id):
@@ -1207,7 +1237,10 @@ async def disable_pic(client, message):
     pic_enabled[message.chat.id] = False
     await message.reply_text("❌ Profile picture sending is now *disabled* in this chat.")
 
-@pyro_client.on_message(pyro_filters.command("pic") & pyro_filters.reply)
+from pyrogram.enums import ChatType
+from pyrogram.types import InputMediaPhoto
+
+@pyro_client.on_message(pyro_filters.command("pic"))
 async def get_profile_pics(client, message):
     global sending_pics
     if not pic_enabled.get(message.chat.id, True):
@@ -1217,21 +1250,60 @@ async def get_profile_pics(client, message):
         return
     sending_pics = True
     try:
-        user = message.reply_to_message.from_user
+        # --- Resolve target user ---
+        target = None
+        if message.reply_to_message:
+            target = message.reply_to_message.from_user.id
+        elif len(message.command) > 1:  # /pic @username or user_id
+            arg = message.command[1]
+            try:
+                if arg.isdigit():
+                    target = int(arg)
+                else:
+                    user = await client.get_users(arg)
+                    target = user.id
+            except Exception:
+                await message.reply_text("🚫 Invalid username or user ID.")
+                sending_pics = False
+                return
+        else:
+            await message.reply_text("⚠️ Reply to a user or provide @username/user_id.")
+            sending_pics = False
+            return
+
+        # --- Collect photos ---
         photos = []
-        async for photo in client.get_chat_photos(user.id):
+        async for photo in client.get_chat_photos(target):
             photos.append(photo.file_id)
         if not photos:
             await message.reply_text("🚫 No profile photos found for this user.")
             sending_pics = False
             return
+
+        # --- Decide where to send ---
+        send_chat_id = message.chat.id
+        dm_mode = False
+        if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+            send_chat_id = message.from_user.id
+            dm_mode = True
+            await message.reply_text("📩 Profile pictures will be sent to your DM.")
+
+        # --- Send in batches of 10 ---
         for i in range(0, len(photos), 10):
             media_group = [InputMediaPhoto(file_id) for file_id in photos[i:i+10]]
-            await client.send_media_group(chat_id=message.chat.id, media=media_group)
+            try:
+                await client.send_media_group(chat_id=send_chat_id, media=media_group)
+            except Exception:
+                if dm_mode:
+                    await message.reply_text("⚠️ I can’t send you DMs. Please start me in private first!")
+                break
+
     except Exception as e:
         await message.reply_text(f"⚠️ Error: {str(e)}")
     finally:
         sending_pics = False
+
+
 
 
 
@@ -1332,6 +1404,16 @@ def google_search(query: str, current_time: str, current_date: str) -> str:
 
     except Exception as e:
         raise RuntimeError(f"Google error: {str(e)}")
+from telegram.constants import ChatMemberStatus
+
+
+async def is_member_admin(chat, user_id: int) -> bool:
+    """Return True if user is admin/owner in this chat."""
+    try:
+        member = await chat.get_member(user_id)
+        return member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER, "administrator", "creator")
+    except:
+        return False
 
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args and not update.message.reply_to_message:
@@ -1350,7 +1432,7 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Build structured prompt
     query_prompt = (
         f"You are Dikshika ᥫ᭡, a polite and structured assistant.\n"
-        f"Provide a concise, accurate response with:\n"
+        f"Provide a short to moderate length replies, accurate response with:\n"
         f"✘ Bold section headings\n"
         f"• Bullet points\n"
         f"• Clear spacing\n"
@@ -1776,11 +1858,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=kb
         )
 
-    # === Kang registration (your old logic) ===
+    # === Kang registration logic ===
     if args and args[0] == "kang":
         await update.message.reply_text(
             "✅ You’re registered! Now go back and use /kang again."
         )
+        return
+
+    # ✅ Auto-send help when in private chat
+    if update.effective_chat.type == "private":
+        await help_command(update, context)
     else:
         await update.message.reply_text(
             "👋 Hi! I’m your group management bot.\n\n"
@@ -1789,78 +1876,89 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    commands = [
-        "/info - Show user info ",
-        "/warn - Warn user, ban after 3 warns ",
-        "/warns- shows total number of warns a user have"
-        "/del - Delete message (reply)",
-        "/ban - Ban user ",
-        "/unban - Unban user by ID",
-        "/admins - List admins",
-        "/promote - Promote user to admin ",
-        "/demote - Demote admin ",
-        "/addblacklist - Add blacklist word",
-        "/unblacklist - Remove blacklist word",
-        "/blacklist - Show blacklist",
-        "/unblacklistall- deletes all blacklist words"
-        "/approve - Approve user ",
-        "/unapprove - Unapprove user ",
-        "/approved- shows list of all approved users",
-        "/unapproveall- unapproves all approved users",
-        "/purge - Delete last N messages",
-        "/filter - Add filter",
-        "/filters - List filters",
-        "/unfilter - Remove filter",
-        "/afk - Set AFK status",
-        "/mute - Mute user ",
-        "/unmute - Unmute user ",
-        "/id - Show user or chat ID",
-        "/kick - Kick user ",
-        "/tmute - Temporarily mute user ",
-        "/kickme - Kick yourself",
-        "/waifu - Get you partner, approved by astro ",
-        "/tagall - Tag all members",
-        "/pin - Pin message (reply)",
-        "/unpin - Unpin all messages",
-        "/setflood - can restrict user from spamming",
-        "/setfloodmode - action taken if user floods the chat",
-        "/q - can quote texts",
-        "/blacklistmode - tmute/mute/ban/warn/kick/delete ",
-        "/lock - lock any type",
-        "/unlock - unlock any type",
-        "/locks - list of all locks present",
-        "/kang- save any sticker/gif in your pack",
-        "/zombies- Show the number of deleted accounts present",
-        "/rzombies- Remove all the deleted accpunts present",
-        "/tr- translate text to your desired language",
-        "/getsticker- gives sticker in png form with sticker id",
-        "/pp- search for the photo and gives description about it",
-        "/calc- calculates anything",
-        "/report- report to admins",
-        "/nightmode- deletes non-text messages of unapproved and non admin users",
-        "/ud- tells meaning of the wprd",
-        "/rmwarn- remove one warning of user",
-        "/resetwarns- removes all warning of user",
-        "/welcome on/of- turn welcome messages on/off",
-        "/setwelcome- set a welcome message for new users",
-        "/goodbye- turn goodbye message on/off",
-        "/setgoodbye- set a goodbye message who lefts the group",
-        "/when- shows when the message was sent",
-        "/captcha- force user to solve captcha before interacting in group when he/she joins",
-        "/pic - shows all pfp of a user",
-        "/free- free a user and allow to send stickers",
-        "/unfree- restrict a user from sending stickers",
-        "/freelist- shows all freed user",
-        "/character- get a overview of any anime character",
-        "/unfilterall- removes all filters",
-        "/zombies- show total deleted accounts in group",
-        "/rzombies- remove all deleted accounts"
-        "/editdelete - deletes all edited message after 30s"
 
-    ]
-    
-    await update.message.reply_text("Available commands:\n" + "\n".join(commands))
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type in ["group", "supergroup"]:
+        # Group → Show message with inline button linking to PM
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💐 Start me in PM!", url=f"https://t.me/{BOT_USERNAME}")]
+        ])
+        await update.message.reply_text(
+            "Start me in pm to know my abilities and commands!",
+            reply_markup=keyboard
+        )
+    else:
+        # Private chat → Show full commands list
+        commands = [
+            "/info - Show user info",
+            "/warn - Warn user, ban after 3 warns",
+            "/warns - Show total number of warns a user has",
+            "/del - Delete message (reply)",
+            "/ban - Ban user",
+            "/unban - Unban user by ID",
+            "/admins - List admins",
+            "/promote - Promote user to admin",
+            "/demote - Demote admin",
+            "/addblacklist - Add blacklist word",
+            "/unblacklist - Remove blacklist word",
+            "/blacklist - Show blacklist",
+            "/unblacklistall - Deletes all blacklist words",
+            "/approve - Approve user",
+            "/unapprove - Unapprove user",
+            "/approved - Show list of all approved users",
+            "/unapproveall - Unapproves all approved users",
+            "/purge - Delete last N messages",
+            "/filter - Add filter",
+            "/filters - List filters",
+            "/unfilter - Remove filter",
+            "/afk - Set AFK status",
+            "/mute - Mute user",
+            "/unmute - Unmute user",
+            "/id - Show user or chat ID",
+            "/kick - Kick user",
+            "/tmute - Temporarily mute user",
+            "/kickme - Kick yourself",
+            "/waifu - Get your partner, approved by astro",
+            "/tagall - Tag all members",
+            "/pin - Pin message (reply)",
+            "/unpin - Unpin all messages",
+            "/setflood - Restrict user from spamming",
+            "/setfloodmode - Action taken if user floods the chat",
+            "/q - Quote texts",
+            "/blacklistmode - tmute/mute/ban/warn/kick/delete",
+            "/lock - Lock any type",
+            "/unlock - Unlock any type",
+            "/locks - List all locks present",
+            "/kang - Save any sticker/gif in your pack",
+            "/zombies - Show number of deleted accounts",
+            "/rzombies - Remove all deleted accounts",
+            "/tr - Translate text to your desired language",
+            "/getsticker - Gives sticker in png form with sticker ID",
+            "/pp - Search for photo and gives description",
+            "/calc - Calculates anything",
+            "/report - Report to admins",
+            "/nightmode - Delete non-text of unapproved/non-admin users",
+            "/ud - Tell meaning of word",
+            "/rmwarn - Remove one warning of user",
+            "/resetwarns - Removes all warnings of user",
+            "/welcome on/off - Enable or disable welcome messages",
+            "/setwelcome - Set custom welcome message",
+            "/goodbye - Enable or disable goodbye messages",
+            "/setgoodbye - Set goodbye message",
+            "/when - Show when a message was sent",
+            "/captcha - Force captcha before user interacts in group",
+            "/pic - Show all profile photos of a user",
+            "/free - Free user, allow sending stickers",
+            "/unfree - Restrict user from sending stickers",
+            "/freelist - Show all freed users",
+            "/character - Overview of anime character",
+            "/unfilterall - Removes all filters",
+            "/editdelete - Deletes all edited messages after 30s",
+            "/freesystem- turn on/off the free system"
+        ]
+
+        help_text = "Available commands:\n" + "\n".join(commands)
+        await update.message.reply_text(help_text, parse_mode="HTML")
 
 
 def escape_md(text: str) -> str:
@@ -2052,6 +2150,100 @@ async def warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Couldn't ban user: {e}")
 
 
+from telegram.ext import CommandHandler
+from PIL import Image, ImageDraw, ImageFont
+import os
+import tempfile
+
+from telegram.ext import CommandHandler
+from PIL import Image, ImageDraw, ImageFont
+import os, tempfile
+
+async def memify(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.reply_to_message:
+        await update.message.reply_text("⚠️ Reply to a photo or static sticker with /mmf or /mms top ; bottom")
+        return
+
+    reply = update.message.reply_to_message
+    cmd = update.message.text.split()[0][1:]  # mmf or mms
+    text_input = " ".join(context.args)
+    if not text_input:
+        await update.message.reply_text("⚠️ Provide text like: /mmf top ; bottom")
+        return
+
+    # Split text
+    if ";" in text_input:
+        top_text, bottom_text = [t.strip() for t in text_input.split(";", 1)]
+    else:
+        top_text, bottom_text = text_input.strip(), ""
+
+    # --- Download replied media ---
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_in:
+        if reply.photo:
+            file = await reply.photo[-1].get_file()
+            await file.download_to_drive(custom_path=temp_in.name)
+        elif reply.sticker and not reply.sticker.is_animated and not reply.sticker.is_video:
+            file = await reply.sticker.get_file()
+            await file.download_to_drive(custom_path=temp_in.name)
+        else:
+            await update.message.reply_text("⚠️ Only photos and static stickers are supported.")
+            return
+        img_path = temp_in.name
+
+    # --- Open image ---
+    img = Image.open(img_path).convert("RGBA")
+    draw = ImageDraw.Draw(img)
+
+    # Font
+    try:
+        font_path = os.path.join("fonts", "impact.ttf")
+        font = ImageFont.truetype(font_path, size=int(img.height / 10))
+    except Exception:
+        font = ImageFont.load_default()
+
+    # Helper: draw outlined text
+    def draw_text_centered(text, y):
+        if not text:
+            return
+        bbox = draw.textbbox((0, 0), text, font=font)
+        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        x = (img.width - w) / 2
+        for dx in [-2, 2]:
+            for dy in [-2, 2]:
+                draw.text((x+dx, y+dy), text, font=font, fill="black")
+        draw.text((x, y), text, font=font, fill="white")
+
+    # Add meme text (NO .upper())
+    draw_text_centered(top_text, 10)
+    draw_text_centered(bottom_text, img.height - int(img.height / 8))
+
+    # --- Save output ---
+    if cmd == "mmf":
+        output_path = tempfile.mktemp(suffix=".jpg")
+        img.convert("RGB").save(output_path, "JPEG")
+        with open(output_path, "rb") as out:
+            await update.message.reply_photo(out)
+    else:
+        output_path = tempfile.mktemp(suffix=".webp")
+        img.save(output_path, "WEBP")
+        with open(output_path, "rb") as out:
+            await update.message.reply_sticker(out)
+
+    # Cleanup
+    os.remove(img_path)
+    os.remove(output_path)
+
+
+
+# === Register commands ===
+
+
+
+
+# === Register command ===
+
+
+
 async def resetwarns(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await has_permission(update, ["can_restrict_members"]):
         return await update.message.reply_text("🚫 You need 'Can Restrict Members' permission to use this command.")
@@ -2111,19 +2303,27 @@ async def rmwarn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def delmsg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await has_permission(update, ["can_delete_messages"]):
-        return await update.message.reply_text("🚫 You need 'Can Delete Messages' permission to use this command.")
+        return await update.message.reply_text(
+            "🚫 You need 'Can Delete Messages' permission to use this command."
+        )
 
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("You must be an admin to delete messages.")
         return
+
     if not update.message.reply_to_message:
         await update.message.reply_text("Reply to the message to delete it.")
         return
+
     try:
+        # Delete the replied message
         await update.message.reply_to_message.delete()
-        await update.message.reply_text("Message deleted.")
+        # Delete the /del command message itself
+        await update.message.delete()
     except BadRequest as e:
+        # Only show error if deletion fails
         await update.message.reply_text(f"Error: {e}")
+
 
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await has_permission(update, ["can_restrict_members"]):
@@ -2732,26 +2932,89 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     locked = get_locked(chat_id)
     is_admin_user = await is_admin(update, sender_id)
 
-    # Block /info command
-    if "info" in locked and message.text and message.text.startswith("/info"):
-        try:
-            await message.delete()
-        except Exception:
-            pass
+
+    # ---- NEW CUSTOM LOCK TYPES ----
+
+    # Channelforward: Delete all forwards from channels
+        # ---- NEW CUSTOM LOCK TYPES ----
+
+    # Channelforward: Delete all forwards from channels
+    if "channelforward" in locked and message.forward_from_chat:
+        if message.forward_from_chat.type == "channel":
+            if not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+            return
+
+    # Channelmessage: Ban sender if message is from a channel
+    if "channelmessage" in locked and message.sender_chat:
+        if message.sender_chat.type == "channel":
+            if not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
+                try:
+                    await update.effective_chat.ban_member(message.sender_chat.id)
+                except Exception:
+                    pass
+            return
+
+    # Forwardstory: Delete any forwarded story
+    if "forwardstory" in locked and message.forward_date and message.forward_from:
+        if not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
+            try:
+                await message.delete()
+            except Exception:
+                pass
         return
 
-    # Block pin service message (if applicable)
-    if "pin" in locked and getattr(message, "pinned_message", None) is not None:
-        try:
-            await message.delete()
-        except Exception:
-            pass
+    # Forwarduser: Delete messages forwarded from users
+    if "forwarduser" in locked and message.forward_from:
+        if not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
+            try:
+                await message.delete()
+            except Exception:
+                pass
         return
+
+
+
+
+
 
     # ENFORCE LOCKED TYPES FOR NON-ADMINS
     if not is_admin_user and sender_id not in approved_users.get(chat_id, set()):
         m = message
         # media locks etc...
+        if "bots" in locked:
+            text_content = (m.text or m.caption or "").lower()
+            if re.search(r"@[\w_]{1,31}bot\b", text_content):
+                try:
+                    await m.delete()
+                except Exception:
+                    pass
+                return
+        if "emoji" in locked:
+            text_content = (m.text or m.caption or "")
+            if text_content and re.search(r"[\U0001F600-\U0001F64F"
+                                           r"\U0001F300-\U0001F5FF"
+                                           r"\U0001F680-\U0001F6FF"
+                                           r"\U0001F1E0-\U0001F1FF"
+                                           r"\U00002702-\U000027B0"
+                                           r"\U000024C2-\U0001F251]", text_content):
+                try:
+                    await m.delete()
+                except Exception:
+                    pass
+                return
+        if "gmail" in locked:
+            text_content = (m.text or m.caption or "")
+            if text_content and re.search(r"\b[a-zA-Z0-9._%+-]+@gmail\.com\b", text_content):
+                try:
+                    await m.delete()
+                except Exception:
+                    pass
+                return
+
         if "media" in locked and (getattr(m, "media", None) or getattr(m, "sticker", None) or getattr(m, "animation", None)
                                   or getattr(m, "document", None) or getattr(m, "photo", None) or getattr(m, "video", None)
                                   or getattr(m, "audio", None) or getattr(m, "voice", None)):
@@ -2761,36 +3024,21 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-        if "messages" in locked and (m.text and not getattr(m, "media", None) and not getattr(m, "via_bot", None)):
-            try:
-                await m.delete()
-            except Exception:
-                pass
-            return
+
         if "audio" in locked and getattr(m, "audio", None):
             try:
                 await m.delete()
             except Exception:
                 pass
             return
-        if "voice" in locked and getattr(m, "voice", None):
-            try:
-                await m.delete()
-            except Exception:
-                pass
-            return
+
         if "document" in locked and getattr(m, "document", None):
             try:
                 await m.delete()
             except Exception:
                 pass
             return
-        if "photos" in locked and getattr(m, "photo", None):
-            try:
-                await m.delete()
-            except Exception:
-                pass
-            return
+
         if "video" in locked and getattr(m, "video", None):
             try:
                 await m.delete()
@@ -2809,41 +3057,24 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             return
-        if "contact" in locked and getattr(m, "contact", None):
-            try:
-                await m.delete()
-            except Exception:
-                pass
-            return
-        if "location" in locked and (getattr(m, "location", None) or getattr(m, "venue", None)):
-            try:
-                await m.delete()
-            except Exception:
-                pass
-            return
+
+
         if "poll" in locked and getattr(m, "poll", None):
             try:
                 await m.delete()
             except Exception:
                 pass
             return
-        if "inline" in locked and getattr(m, "via_bot", None) is not None:
-            try:
-                await m.delete()
-            except Exception:
-                pass
-            return
-        if "buttons" in locked and getattr(m, "reply_markup", None) is not None:
-            try:
-                has_buttons = bool(getattr(m.reply_markup, "inline_keyboard", None)) or bool(getattr(m.reply_markup, "keyboard", None))
-            except Exception:
-                has_buttons = True
-            if has_buttons:
+        if "inline" in locked:
+    # Check if message has inline attribution (via_bot field)
+            if getattr(m, "via_bot", None) and m.via_bot.username:
                 try:
                     await m.delete()
                 except Exception:
                     pass
                 return
+
+
         if "forward" in locked and (getattr(m, "forward_from", None) or getattr(m, "forward_from_chat", None)
                                     or getattr(m, "forward_sender_name", None) or getattr(m, "forward_date", None)):
             try:
@@ -2851,47 +3082,31 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             return
-        if "url" in locked and has_url_entities(m):
-            try:
-                await m.delete()
-            except Exception:
-                pass
-            return
-        if "previews" in locked and has_url_entities(m):
-            try:
-                await m.delete()
-            except Exception:
-                pass
-            return
-        if "rtl" in locked and (m.text or getattr(m, "caption", None)):
-            text_ = m.text or getattr(m, "caption", "")
-            if contains_bidi(text_):
+
+        
+
+        if "links" in locked:
+            text_content = (m.text or m.caption or "")
+            if text_content and re.search(r"(https?://[^\s]+|www\.[^\s]+|t\.me/[^\s]+)", text_content, re.IGNORECASE):
                 try:
                     await m.delete()
                 except Exception:
                     pass
                 return
-        if "other" in locked and (getattr(m, "dice", None) or getattr(m, "game", None) or getattr(m, "invoice", None)):
+
+        if "premiumemoji" in locked and has_premium_emoji(m):
             try:
                 await m.delete()
             except Exception:
                 pass
             return
-        if "game" in locked and getattr(m, "game", None):
+
+
+
+
+        if "botlink" in locked and has_botlink(message):
             try:
-                await m.delete()
-            except Exception:
-                pass
-            return
-        if "egames" in locked and (getattr(m, "game", None) or getattr(m, "dice", None)):
-            try:
-                await m.delete()
-            except Exception:
-                pass
-            return
-        if "invite" in locked and has_invite_link(m):
-            try:
-                await m.delete()
+                await message.delete()
             except Exception:
                 pass
             return
@@ -4387,12 +4602,12 @@ def schedule_nightmode_jobs(application, chat_id):
 async def nightmode_start(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.chat_id
     if nightmode_status.get(chat_id, False):
-        await context.bot.send_message(chat_id, "🌙 Nightmode has started in this group. Only text allowed for non-approved/non-admins.")
+        await context.bot.send_message(chat_id, "🌒 STARTED NIGHT MODE \n\n⚓️ From this time until 7 o'clock, all users will not be able to send media (photos, videos, files...) and links in the group.\n\nHave a good night 🌉!")
 
 async def nightmode_end(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.chat_id
     if nightmode_status.get(chat_id, False):
-        await context.bot.send_message(chat_id, "☀️ Nightmode has ended. Everyone can send anything now.")
+        await context.bot.send_message(chat_id, "🌌 ENDED NIGHT MODE\n\n⚓️ From Now time all users will be able to send media (photos, videos, files...) and links in the group.\n\n💐 Have a great day!")
 
 
 
@@ -4419,8 +4634,10 @@ async def unapproveall(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def approved(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await has_permission(update, ["can_change_info"]):
-        return await update.message.reply_text("🚫 You need 'Can Change Info' permission to use this command.")
+    if not await is_admin(update, update.effective_user.id):
+        return await update.message.reply_text("🚫 Only admins can use this command.")
+    
+
 
     chat_id = update.effective_chat.id
     if chat_id not in approved_users or not approved_users[chat_id]:
@@ -4829,6 +5046,9 @@ async def unfree_user(client, message):
     await message.reply_text(f"❌ {target.mention} can no longer send stickers & GIFs.")
 
 
+
+
+
 @pyro_client.on_message(pyro_filters.command("freelist"))
 async def free_list(client, message):
     if not await is_admin_pyro(client, message.chat.id, message.from_user.id):
@@ -4849,6 +5069,43 @@ async def free_list(client, message):
     await message.reply_text(text, parse_mode=__import__("pyrogram.enums").enums.ParseMode.HTML)
 
 
+
+
+# === FREE SYSTEM CONTROL ===
+free_system_enabled = {}  # {chat_id: bool}
+
+@pyro_client.on_message(pyro_filters.command("freesystem"))
+async def toggle_free_system(client, message):
+    if not await is_admin_pyro(client, message.chat.id, message.from_user.id):
+        return await message.reply_text("🚫 Only admins can use this command.")
+
+    args = message.command[1:] if hasattr(message, "command") else []
+    if not args or args[0].lower() not in ["on", "off"]:
+        return await message.reply_text("Usage: /freesystem on|off")
+
+    status = args[0].lower() == "on"
+    free_system_enabled[message.chat.id] = status
+    await message.reply_text(f"✅ Free system {'enabled' if status else 'disabled'} in this chat.")
+
+@pyro_client.on_message(pyro_filters.sticker)
+async def restrict_stickers(client, message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    # If system is OFF → ignore
+    if not free_system_enabled.get(chat_id, True):
+        return
+
+    # ✅ Skip bots and admins
+    if message.from_user.is_bot or await is_admin_pyro(client, chat_id, user_id):
+        return
+
+    # If system is ON → enforce free list
+    if user_id not in free_users.get(chat_id, set()):
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
 
 
@@ -4913,9 +5170,15 @@ async def start_bots():
             await pyro_client.start()
             print("[Pyrogram] Client started")
 
-        application = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).build()
+        application = (
+            ApplicationBuilder()
+            .token(BOT_TOKEN)
+            .concurrent_updates(True)
+            .post_init(skip_updates)   # 🚀 clear old updates before polling
+            .build()
+        )
 
-    # Register all handlers here (already present in your code)
+    
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("info", info))
@@ -4992,23 +5255,9 @@ async def start_bots():
         application.add_handler(CommandHandler("unfilterall", unfilterall))
         application.add_handler(CallbackQueryHandler(blacklist_callback, pattern=r"^bl_"))
         application.add_handler(CommandHandler("editdelete", editdelete_command))
-        # Register handler specifically for edited messages using update types
+        application.add_handler(CommandHandler("mmf", memify))
+        application.add_handler(CommandHandler("mms", memify))
         application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, edited_message_handler, block=False), group=2)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -5053,5 +5302,4 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
