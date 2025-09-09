@@ -5127,7 +5127,7 @@ async def block_unfree_media(client, message):
         except Exception:
             pass
 
-
+skip_updates = True
 
 load_lock_state()
 
@@ -5174,10 +5174,10 @@ async def start_bots():
             ApplicationBuilder()
             .token(BOT_TOKEN)
             .concurrent_updates(True)
+            .post_init(skip_updates)   # 🚀 clear old updates before polling
             .build()
         )
 
-        await application.run_polling(drop_pending_updates=True)
 
     
         application.add_handler(CommandHandler("start", start))
@@ -5303,6 +5303,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
