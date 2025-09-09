@@ -5174,7 +5174,7 @@ async def start_bots():
             ApplicationBuilder()
             .token(BOT_TOKEN)
             .concurrent_updates(True)
-            .post_init(skip_updates)   # 🚀 clear old updates before polling
+            .updater.start_polling(drop_pending_updates=True)   # 🚀 clear old updates before polling
             .build()
         )
 
@@ -5302,4 +5302,5 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
