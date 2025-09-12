@@ -198,6 +198,7 @@ sticker_blacklist = {}   # chat_id -> set of sticker_file_ids
 pack_blacklist = {}      # chat_id -> set of set_name (sticker pack names)
 sticker_map = {}         # short_id -> real sticker.file_id
 pack_map = {}            # short_id -> real pack_name
+BOT_START_TIME = time.time()
 
 
 
@@ -509,6 +510,33 @@ def has_premium_emoji(message):
             return True
     return False
 
+# At top of your file (after imports)
+
+# --- Ping Command ---
+async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in MODS:  # ✅ Only mods allowed
+        return
+
+    start_time = time.time()
+    sent = await update.message.reply_text("🏓 Pinging...")
+    end_time = time.time()
+
+    ping_ms = (end_time - start_time) * 1000  # ms
+    uptime_sec = int(time.time() - BOT_START_TIME)
+
+    # Format uptime
+    days, rem = divmod(uptime_sec, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+    uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
+
+    await sent.edit_text(
+        f"🏓 Pong!\n"
+        f"⚡ Response: <b>{ping_ms:.2f} ms</b>\n"
+        f"⏳ Uptime: <b>{uptime_str}</b>",
+        parse_mode="HTML"
+    )
 
 async def prepare_static(bot, file_id):
     new_file = await bot.get_file(file_id)
@@ -3101,6 +3129,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
+        
+        # 🚫 Premium emoji lock
+        if "premiumemoji" in get_locked(chat_id):
+            if has_premium_emoji(message):
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                return
 
 
 
@@ -5258,6 +5295,7 @@ async def start_bots():
         application.add_handler(CommandHandler("editdelete", editdelete_command))
         application.add_handler(CommandHandler("mmf", memify))
         application.add_handler(CommandHandler("mms", memify))
+        application.add_handler(CommandHandler("ping", ping_command))
         application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, edited_message_handler, block=False), group=2)
 
 
@@ -5303,6 +5341,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
