@@ -200,6 +200,8 @@ sticker_map = {}         # short_id -> real sticker.file_id
 pack_map = {}            # short_id -> real pack_name
 BOT_START_TIME = time.time()
 
+# --- Moderators ---
+MODS = {7038303029, 7556899383, 8270168877, 8432931494, 7560366347}  # 🔹 Replace with your actual Telegram user IDs
 
 
 # Track approved users (chat_id: set of user_ids)
@@ -5341,6 +5343,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
