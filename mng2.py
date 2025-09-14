@@ -199,6 +199,12 @@ pack_blacklist = {}      # chat_id -> set of set_name (sticker pack names)
 sticker_map = {}         # short_id -> real sticker.file_id
 pack_map = {}            # short_id -> real pack_name
 BOT_START_TIME = time.time()
+PACKS_FILE = "packs.json"
+
+# {user_id: {"static": {"version": 1, "name": "u12345_by_bot"},
+#            "animated": {...}, "video": {...}}}
+user_packs = {}
+
 
 # --- Moderators ---
 MODS = {7038303029, 7556899383, 8270168877, 8432931494, 7560366347}  # 🔹 Replace with your actual Telegram user IDs
@@ -239,6 +245,23 @@ def load_lock_state():
     else:
         _state = {}
 
+def load_packs():
+    global user_packs
+    if os.path.exists(PACKS_FILE):
+        try:
+            with open(PACKS_FILE, "r", encoding="utf-8") as f:
+                user_packs = json.load(f)
+        except Exception:
+            user_packs = {}
+    else:
+        user_packs = {}
+
+def save_packs():
+    try:
+        with open(PACKS_FILE, "w", encoding="utf-8") as f:
+            json.dump(user_packs, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 def get_pack_name(user, is_video=False, is_animated=False, version=1):
     if is_animated:
@@ -1017,8 +1040,18 @@ async def kang(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await wait_msg.edit_text("❌ Unsupported file type. Reply to a sticker, photo, or gif.")
         return
 
-    pack_name = get_pack_name(user, is_video, is_animated, version)
-    pack_title = get_pack_title(user, is_video, is_animated, version)
+    # 🔹 pack type key
+    kind = "animated" if is_animated else "video" if is_video else "static"
+
+    # 🔹 check JSON for saved pack
+    user_data = user_packs.get(str(user.id), {}).get(kind)
+    if user_data:
+        version = user_data.get("version", 1)
+        pack_name = user_data.get("name")
+        pack_title = get_pack_title(user, is_video, is_animated, version)
+    else:
+        pack_name = get_pack_name(user, is_video, is_animated, version)
+        pack_title = get_pack_title(user, is_video, is_animated, version)
 
     print("==== DEBUG ====")
     print("PACK NAME :", pack_name)
@@ -1034,11 +1067,8 @@ async def kang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         sticker_format = "static"
 
-    # reset file buffer before creating InputSticker
     sticker_file.seek(0)
     input_sticker = InputSticker(sticker=sticker_file, emoji_list=[emoji])
-
-
 
     try:
         sticker_file.seek(0)
@@ -1050,17 +1080,43 @@ async def kang(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sticker_format=sticker_format,
         )
 
+        # ✅ save pack info
+        user_packs.setdefault(str(user.id), {})
+        user_packs[str(user.id)][kind] = {"version": version, "name": pack_name}
+        save_packs()
+
     except Exception as ce:
         print("CREATE ERROR:", ce)
-        if "already occupied" in str(ce):
-            sticker_file.seek(0)
-            await context.bot.add_sticker_to_set(
-                user_id=user.id,
-                name=pack_name,
-                sticker=input_sticker,
-            )
 
+        if "already occupied" in str(ce).lower():
+            try:
+                # 🔄 Try adding to existing pack
+                sticker_file.seek(0)
+                await context.bot.add_sticker_to_set(
+                    user_id=user.id,
+                    name=pack_name,
+                    sticker=input_sticker,
+                )
+            except Exception as ae:
+                print("ADD ERROR:", ae)
+                # 🚀 If add fails → bump version and create new pack
+                version += 1
+                pack_name = get_pack_name(user, is_video, is_animated, version)
+                pack_title = get_pack_title(user, is_video, is_animated, version)
 
+                sticker_file.seek(0)
+                await context.bot.create_new_sticker_set(
+                    user_id=user.id,
+                    name=pack_name,
+                    title=pack_title,
+                    stickers=[input_sticker],
+                    sticker_format=sticker_format,
+                )
+
+                # ✅ update JSON
+                user_packs.setdefault(str(user.id), {})
+                user_packs[str(user.id)][kind] = {"version": version, "name": pack_name}
+                save_packs()
         else:
             await wait_msg.edit_text(f"❌ Failed to create sticker pack:\n{ce}")
             return
@@ -1070,9 +1126,9 @@ async def kang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     sticker_file.seek(0)
-    # Update wait message before sending final sticker
     await wait_msg.edit_text("✅ Sticker added successfully!")
     await message.reply_sticker(sticker_file, reply_markup=keyboard)
+
 
 
 
@@ -5343,6 +5399,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
