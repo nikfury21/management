@@ -5205,6 +5205,10 @@ async def restrict_stickers(client, message):
 # === ENFORCE STICKER & GIF RESTRICTION ===
 @pyro_client.on_message(pyro_filters.sticker | pyro_filters.animation)
 async def block_unfree_media(client, message):
+    # 🚫 If free system is OFF → allow everything
+    if not free_system_enabled.get(message.chat.id, True):
+        return
+
     chat_id = message.chat.id
     user_id = message.from_user.id
 
@@ -5397,6 +5401,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
