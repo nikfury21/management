@@ -208,6 +208,7 @@ user_packs = {}
 
 # --- Moderators ---
 MODS = {7038303029, 7556899383, 8270168877, 8432931494, 7560366347}  # 🔹 Replace with your actual Telegram user IDs
+MOD_IDS = MODS  # alias so both names work
 
 
 # Track approved users (chat_id: set of user_ids)
@@ -231,29 +232,7 @@ INVITE_REGEX = re.compile(r"t\.me/joinchat/|t\.me/\+|telegram\.me/\+", re.IGNORE
 BOTLINK_REGEX = re.compile(r"t\.me/[A-Za-z0-9_]+bot", re.IGNORECASE)
 
 
-@bot.on(events.NewMessage(pattern='/ping'))
-async def ping_handler(event):
-    if event.sender_id not in MOD_IDS:
-        return  # 🚫 Only for MOD_IDS
 
-    start = datetime.datetime.now()
-    msg = await event.reply("📡 Pinging...")
-    end = datetime.datetime.now()
-
-    # Calculate latency
-    latency = (end - start).total_seconds()
-
-    # Calculate uptime
-    uptime = datetime.datetime.now() - bot_start_time
-    days = uptime.days
-    hours, remainder = divmod(uptime.seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    await msg.edit(
-        f" Pong! It took <b>{latency:.2f} seconds</b>\n"
-        f"Uptime – {days}d {hours}h {minutes}m {seconds}s",
-        parse_mode='html'
-    )
 
 
 def load_lock_state():
@@ -560,31 +539,7 @@ def has_premium_emoji(message):
 
 # At top of your file (after imports)
 
-# --- Ping Command ---
-async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in MODS:  # ✅ Only mods allowed
-        return
 
-    start_time = time.time()
-    sent = await update.message.reply_text("🏓 Pinging...")
-    end_time = time.time()
-
-    ping_ms = (end_time - start_time) * 1000  # ms
-    uptime_sec = int(time.time() - BOT_START_TIME)
-
-    # Format uptime
-    days, rem = divmod(uptime_sec, 86400)
-    hours, rem = divmod(rem, 3600)
-    minutes, seconds = divmod(rem, 60)
-    uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
-
-    await sent.edit_text(
-        f"🏓 Pong!\n"
-        f"⚡ Response: <b>{ping_ms:.2f} ms</b>\n"
-        f"⏳ Uptime: <b>{uptime_str}</b>",
-        parse_mode="HTML"
-    )
 
 async def prepare_static(bot, file_id):
     new_file = await bot.get_file(file_id)
@@ -1188,6 +1143,29 @@ async def set_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_settings[chat_id]["message"] = {"text": text}
     await update.message.reply_text("✅ Welcome message set.")
 
+# --- Telethon userbot: /ping handler ---
+@tclient.on(events.NewMessage(pattern=r'^/ping(?:@\w+)?$'))
+async def telethon_ping_handler(event):
+    if event.sender_id not in MODS:  # only allow moderators
+        return
+
+    start = datetime.now()
+    msg = await event.reply("📡 Pinging...")
+    end = datetime.now()
+
+    latency = (end - start).total_seconds()
+
+    # uptime uses BOT_START_TIME (already defined at top of file)
+    uptime = datetime.now() - datetime.fromtimestamp(BOT_START_TIME)
+    days = uptime.days
+    hours, remainder = divmod(uptime.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    await msg.edit(
+        f"🏓 Pong!\n"
+        f"⏱ Latency: {latency:.3f} s\n"
+        f"⏳ Uptime: {days}d {hours}h {minutes}m {seconds}s"
+    )
 
 async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -5422,6 +5400,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
