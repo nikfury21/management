@@ -231,6 +231,29 @@ INVITE_REGEX = re.compile(r"t\.me/joinchat/|t\.me/\+|telegram\.me/\+", re.IGNORE
 BOTLINK_REGEX = re.compile(r"t\.me/[A-Za-z0-9_]+bot", re.IGNORECASE)
 
 
+@bot.on(events.NewMessage(pattern='/ping'))
+async def ping_handler(event):
+    if event.sender_id not in MOD_IDS:
+        return  # 🚫 Only for MOD_IDS
+
+    start = datetime.datetime.now()
+    msg = await event.reply("📡 Pinging...")
+    end = datetime.datetime.now()
+
+    # Calculate latency
+    latency = (end - start).total_seconds()
+
+    # Calculate uptime
+    uptime = datetime.datetime.now() - bot_start_time
+    days = uptime.days
+    hours, remainder = divmod(uptime.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    await msg.edit(
+        f" Pong! It took <b>{latency:.2f} seconds</b>\n"
+        f"Uptime – {days}d {hours}h {minutes}m {seconds}s",
+        parse_mode='html'
+    )
 
 
 def load_lock_state():
@@ -5399,6 +5422,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
