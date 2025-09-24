@@ -5354,7 +5354,6 @@ async def start_bots():
         application.add_handler(CommandHandler("editdelete", editdelete_command))
         application.add_handler(CommandHandler("mmf", memify))
         application.add_handler(CommandHandler("mms", memify))
-        application.add_handler(CommandHandler("ping", ping_command))
         application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, edited_message_handler, block=False), group=2)
 
 
@@ -5400,6 +5399,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
