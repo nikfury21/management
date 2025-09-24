@@ -207,7 +207,7 @@ user_packs = {}
 
 
 # --- Moderators ---
-MODS = {7038303029, 7556899383, 8270168877, 8432931494, 7560366347}  # 🔹 Replace with your actual Telegram user IDs
+MODS = {7038303029, 7556899383, 8270168877, 8432931494, 7560366347, 8353079084}  # 🔹 Replace with your actual Telegram user IDs
 MOD_IDS = MODS  # alias so both names work
 
 
@@ -1143,25 +1143,21 @@ async def set_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_settings[chat_id]["message"] = {"text": text}
     await update.message.reply_text("✅ Welcome message set.")
 
-# --- Telethon userbot: /ping handler ---
-@tclient.on(events.NewMessage(pattern=r'^/ping(?:@\w+)?$'))
-async def telethon_ping_handler(event):
-    if event.sender_id not in MODS:  # only allow moderators
-        return
-
+# --- PTB Bot: /ping handler ---
+async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start = datetime.now()
-    msg = await event.reply("📡 Pinging...")
+    msg = await update.message.reply_text("📡 Pinging...")
     end = datetime.now()
 
     latency = (end - start).total_seconds()
 
-    # uptime uses BOT_START_TIME (already defined at top of file)
+    # uptime uses BOT_START_TIME (already defined at top)
     uptime = datetime.now() - datetime.fromtimestamp(BOT_START_TIME)
     days = uptime.days
     hours, remainder = divmod(uptime.seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    await msg.edit(
+    await msg.edit_text(
         f"🏓 Pong!\n"
         f"⏱ Latency: {latency:.3f} s\n"
         f"⏳ Uptime: {days}d {hours}h {minutes}m {seconds}s"
@@ -5354,6 +5350,8 @@ async def start_bots():
         application.add_handler(CommandHandler("editdelete", editdelete_command))
         application.add_handler(CommandHandler("mmf", memify))
         application.add_handler(CommandHandler("mms", memify))
+        application.add_handler(CommandHandler("ping", ping_command))
+
         application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, edited_message_handler, block=False), group=2)
 
 
@@ -5399,6 +5397,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
