@@ -187,7 +187,7 @@ sending_pics = False
 pic_enabled = {}  # chat_id: True/False
 # LOCK SYSTEM STORAGE AND LOGIC (from lock.py)
 LOCKS_FILE = "locks.json"
-BOT_USERNAME = "Yukino_Roxbot"  # (set to your bot, without @)
+BOT_USERNAME = "hulalalalabot"  # (set to your bot, without @)
 REGISTERED_USERS = set()
 # Nightmode status per chat
 nightmode_status = {}
@@ -5399,6 +5399,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
