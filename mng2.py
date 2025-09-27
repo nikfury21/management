@@ -207,7 +207,7 @@ user_packs = {}
 
 
 # --- Moderators ---
-MODS = {7038303029, 7556899383, 8270168877, 8432931494, 7560366347, 8353079084}  # 🔹 Replace with your actual Telegram user IDs
+MODS = {8353079084}  # 🔹 Replace with your actual Telegram user IDs
 MOD_IDS = MODS  # alias so both names work
 
 
@@ -1901,11 +1901,15 @@ async def resolve_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Telethon global user lookup
     try:
+        if not tclient.is_connected():
+            await tclient.connect()   # 🔹 reconnect if disconnected
         user = await tclient.get_entity(username_or_id)
         return user
     except Exception as e:
         await update.message.reply_text(f"Could not fetch user @{username_or_id}: {e}")
         return None
+
+
 
 def format_name(user):
     name = f"{getattr(user, 'first_name', '') or ''} {getattr(user, 'last_name', '') or ''}".strip()
@@ -5258,8 +5262,8 @@ async def start_bots():
     try:
         # --- Telethon userbot ---
         if "tclient" in globals():
-            await tclient.start()
-            print("[Telethon] Userbot started")
+            await init_telethon()   # 🔹 safer start, handles reconnect
+
 
         # --- Pyrogram userbot ---
         if "pyro_client" in globals():
@@ -5401,6 +5405,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
