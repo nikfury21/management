@@ -1559,12 +1559,12 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /ask <your question> or reply to a message with /ask")
         return
 
-        try:
-            # Step 1: send initial progress message
-            progress_msg = await update.message.reply_text(
-                "<b><i>Fetching response from API...</i></b>",
-                parse_mode="HTML"
-            )
+    try:
+        # Step 1: send initial progress message
+        progress_msg = await update.message.reply_text(
+            "<b><i>Fetching response from API...</i></b>",
+            parse_mode="HTML"
+        )
     
             search_results = tavily_search(prompt)
     
@@ -5462,6 +5462,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
