@@ -144,7 +144,8 @@ client = Client(api_key=GROQ_API_KEY)
 
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 genai.configure(api_key=GEMINI_KEY)
-gemini_model = genai.GenerativeModel("gemini-2.5-flash")
+gemini_model = genai.GenerativeModel("gemini-2.5-flash-preview-09-2025")
+
 
 
 
@@ -404,6 +405,21 @@ else:
 # === Helper Functions ===
 
 HARD_CODED_PROMPT = "You are a helpful intelligent and updated female assistant named 𝖣𝗂𝗄𝗌𝗁𝗂𝗄𝖺 ᥫ᭡. Please answer creatively and politely.Try to use shorter replies.: " #can use any prompt 
+
+
+TAVILY_API_KEY = "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"
+
+def tavily_search(query, max_results=3):
+    url = "https://api.tavily.com/search"
+    payload = {
+        "query": query,
+        "api_key": TAVILY_API_KEY,
+        "max_results": max_results
+    }
+    resp = requests.post(url, json=payload)
+    resp.raise_for_status()
+    data = resp.json()
+    return "\n".join([r["content"] for r in data.get("results", [])])
 
 def save_filters():
     with open(FILTERS_FILE, "w") as f:
@@ -1499,58 +1515,52 @@ async def is_member_admin(chat, user_id: int) -> bool:
         return False
 
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args and not update.message.reply_to_message:
-        await update.message.reply_text("Please provide a question or reply to a message and use /ask.")
-        return
-
-    user_input = " ".join(context.args) if context.args else (
+    prompt = ' '.join(context.args) if context.args else (
         update.message.reply_to_message.text if update.message.reply_to_message and update.message.reply_to_message.text else ""
     )
-    if not user_input:
-        await update.message.reply_text("Replied message has no text.")
+    if not prompt:
+        await update.message.reply_text("Usage: /ask <your question> or reply to a message with /ask")
         return
 
+    try:
+        search_results = tavily_search(prompt)
 
+        full_prompt = f"""
+Based on the following search excerpts, generate a detailed, structured specification:
 
-    # Build structured prompt
-    query_prompt = (
-        f"You are Dikshika ᥫ᭡, a polite and structured assistant.\n"
-        f"Provide a short to moderate length replies, accurate response with:\n"
-        f"✘ Bold section headings\n"
-        f"• Bullet points\n"
-        f"• Clear spacing\n"
-        f"• Highlight **keywords** in bold\n\n"
-        f"Query: {user_input}"
+{search_results}
+
+Instructions:
+- You are Dikshika ᥫ᭡, a polite and helpful assistant.
+- Use structured formatting with ✘ headings and • bullet points in your response.
+- Keep answers clear, concise, and helpful.
+- Use headings like 'Display', 'Performance', 'Memory & Storage', 'Camera', 'Battery', 'Connectivity', 'Other Features'
+- Use bullet points (•)
+- **Bold all keywords** (Type, Size, RAM, Chipset, CPU, Resolution, Capacity, etc.)
+- Proper spacing
+- No tables
+- Add a helpful closing note
+
+Question: {prompt}
+"""
+
+        response = gemini_model.generate_content(full_prompt)
+        answer = response.text if hasattr(response, "text") else "Sorry, I couldn't generate a response."
+
+    except Exception as e:
+        answer = f"Error: {str(e)}"
+
+    # Format safely for Telegram
+    formatted_answer = format_response(answer)
+
+    reply_to_id = update.message.message_id if not update.message.reply_to_message else update.message.reply_to_message.message_id
+    await update.message.reply_text(
+        formatted_answer,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_to_message_id=reply_to_id
     )
 
-    try:
-        # First try Google Search
-        result = google_search(user_input)
-    except Exception:
-        # Fallback to Gemini
-        try:
-            response = gemini_model.generate_content(query_prompt)
-            result = format_response(response.text)
-        except Exception as e:
-            result = f"⚠️ Gemini API Error: {e}"
-
-    # Send response (handle Telegram message length limits)
-    max_len = 4000
-    reply_to_id = update.message.message_id if not update.message.reply_to_message else update.message.reply_to_message.message_id
-
-    if len(result) > max_len:
-        for i in range(0, len(result), max_len):
-            await update.message.reply_text(
-                result[i:i+max_len],
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-                reply_to_message_id=reply_to_id)
-    else:
-        await update.message.reply_text(
-            result,
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_to_message_id=reply_to_id)
 
 
 
@@ -5405,6 +5415,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
