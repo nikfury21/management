@@ -1551,61 +1551,92 @@ async def is_member_admin(chat, user_id: int) -> bool:
     except:
         return False
 
+
+
+def detect_intent(prompt: str) -> list[str]:
+    quick_prompt = f"""
+Classify the following user question into one or more of:
+[identity, chit_chat, specs, gaming, general].
+
+If multiple apply, return them comma separated.
+Question: "{prompt}"
+"""
+    resp = gemini_model.generate_content(quick_prompt)
+    return [x.strip().lower() for x in resp.text.split(",")]
+
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = ' '.join(context.args) if context.args else (
-        update.message.reply_to_message.text if update.message.reply_to_message and update.message.reply_to_message.text else ""
+        update.message.reply_to_message.text
+        if update.message.reply_to_message and update.message.reply_to_message.text else ""
     )
     if not prompt:
-        await update.message.reply_text("Usage: /ask <your question> or reply to a message with /ask")
+        await update.message.reply_text(
+            "Usage: /ask <your question> or reply to a message with /ask"
+        )
         return
 
     try:
-        # Step 1: send initial progress message
+        # Step 1: progress message
         progress_msg = await update.message.reply_text(
-            "<b><i>Fetching response from API...</i></b>",
+            "<b><i>Fetching response...</i></b>",
             parse_mode="HTML"
         )
 
-        search_results = tavily_search(prompt)
+        # === Intent detection ===
+        def detect_intent(question: str) -> list[str]:
+            quick_prompt = f"""
+Classify the following user question into one or more of:
+[identity, chit_chat, specs, gaming, general].
 
-        # Step 2: edit to formatting message
-        await progress_msg.edit_text(
-            "<b><i>Formatting response in a user friendly format...</i></b>",
-            parse_mode="HTML"
-        )
+If multiple apply, return them comma separated.
+Question: "{question}"
+"""
+            resp = gemini_model.generate_content(quick_prompt)
+            return [x.strip().lower() for x in resp.text.split(",")]
 
-        # === Dynamic style instructions ===
-        if any(word in prompt.lower() for word in ["specs", "specifications", "specification" ]):
-            style_instructions = """
+        intents = detect_intent(prompt)
+
+        # === Search only if factual intent is present ===
+        search_results = ""
+        if any(x in intents for x in ["specs", "gaming", "general"]):
+            search_results = tavily_search(prompt)
+
+        # Step 2: build style instructions dynamically
+        style_instructions = ""
+
+        if "identity" in intents or "chit_chat" in intents:
+            style_instructions += """
+            - Start with a warm, short, friendly sentence as yourself (Dikshika ᥫ᭡).
+            - Example: "I’m Dikshika 💫. Here’s what I found:"
+            - Keep it under 2–3 sentences before factual details.
+            """
+
+        if "specs" in intents:
+            style_instructions += """
+            - Present details in sections with ✘ headings and • bullet points.
+            - Use device-spec style headings like 'Display', 'Performance', etc.
+            - Bold important keywords (RAM, Battery, Chipset).
+            """
+
+        if "gaming" in intents:
+            style_instructions += """
+            - Provide the answer in a gamer-friendly way.
             - Use clear sections with ✘ headings and • bullet points.
-            - Keep answers structured, concise, and polite.
-            - Format like a device specification sheet.
-            - Use headings like 'Display', 'Performance', 'Memory & Storage', 'Camera', 'Battery', 'Connectivity', 'Other Features'.
-            - Use bullet points (•).
-            - Bold keywords (Type, Size, RAM, Chipset, etc.).
-            - Keep it concise and clear.
-            """
-        elif any(word in prompt.lower() for word in ["minecraft", "enchant", "netherite", "diamond", "armor", "tool"]):
-            style_instructions = """
-            - Use clear sections with ✘ headings and • bullet points.
-            - Keep answers structured, concise, and polite.
-            - List the best possible enchantments with their maximum levels.
-            - Use a heading like 'Best Enchantments for <Item>'.
-            - Use bullet points (•).
-            - Bold enchantment names (Protection IV, Mending I, etc.).
-            - Add short explanations only if relevant.
-            """
-        else:
-            style_instructions = """
-            - You are Dikshika ᥫ᭡, a polite and helpful assistant.
-            - Use structured formatting with ✘ headings and • bullet points in your response.
-            - Keep answers clear, concise, and helpful.
-            - Use bullet points (•)
-            - Proper spacing
-            - No tables
-            - Add a helpful closing note
+            - If the question is about Minecraft, list the best enchantments/items with max levels.
+            - If it’s another game, explain strategies, items, or tips concisely.
+            - Bold important names (weapons, skills, enchantments, characters).
+            - Keep tone slightly casual but still informative.
             """
 
+
+        if "general" in intents or not intents:
+            style_instructions += """
+            - Answer politely with clear structure.
+            - Use ✘ headings and • bullets where helpful.
+            - Keep it concise and easy to read.
+            """
+
+        # Step 3: final full prompt
         full_prompt = f"""
 Based on the following search excerpts, answer the question:
 
@@ -1618,20 +1649,20 @@ Instructions:
 Question: {prompt}
 """
 
+        # Generate response
         response = gemini_model.generate_content(full_prompt)
-        answer = response.text if hasattr(response, "text") else "Sorry, I couldn't generate a response."
+        answer = response.text if hasattr(response, "text") else "Sorry, I couldn’t generate a response."
 
     except Exception as e:
         answer = f"Error: {str(e)}"
 
-    # Step 3: final edit with formatted answer
+    # Step 4: clean + send final response
     formatted_answer = format_response(answer)
     await progress_msg.edit_text(
         formatted_answer,
         parse_mode="HTML",
         disable_web_page_preview=True
     )
-
 
 
 
@@ -5488,6 +5519,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
