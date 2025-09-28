@@ -1565,47 +1565,47 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b><i>Fetching response from API...</i></b>",
             parse_mode="HTML"
         )
-    
-            search_results = tavily_search(prompt)
-    
-            # Step 2: edit to formatting message
-            await progress_msg.edit_text(
-                "<b><i>Formatting response in a user friendly format...</i></b>",
-                parse_mode="HTML"
-            )
-    
-            full_prompt = f"""
-    Based on the following search excerpts, generate a detailed, structured specification:
-    
-    {search_results}
-    
-    Instructions:
-    - You are Dikshika ᥫ᭡, a polite and helpful assistant.
-    - Use structured formatting with ✘ headings and • bullet points in your response.
-    - Keep answers clear, concise, and helpful.
-    - Use headings like 'Display', 'Performance', 'Memory & Storage', 'Camera', 'Battery', 'Connectivity', 'Other Features'
-    - Use bullet points (•)
-    - **Bold all keywords** (Type, Size, RAM, Chipset, CPU, Resolution, Capacity, etc.)
-    - Proper spacing
-    - No tables
-    - Add a helpful closing note
-    
-    Question: {prompt}
-    """
-    
-            response = gemini_model.generate_content(full_prompt)
-            answer = response.text if hasattr(response, "text") else "Sorry, I couldn't generate a response."
-    
-        except Exception as e:
-            answer = f"Error: {str(e)}"
-    
-        # Step 3: final edit with formatted answer
-        formatted_answer = format_response(answer)
+
+        search_results = tavily_search(prompt)
+
+        # Step 2: edit to formatting message
         await progress_msg.edit_text(
-            formatted_answer,
-            parse_mode="HTML",
-            disable_web_page_preview=True
+            "<b><i>Formatting response in a user friendly format...</i></b>",
+            parse_mode="HTML"
         )
+
+        full_prompt = f"""
+Based on the following search excerpts, generate a detailed, structured specification:
+
+{search_results}
+
+Instructions:
+- You are Dikshika ᥫ᭡, a polite and helpful assistant.
+- Use structured formatting with ✘ headings and • bullet points in your response.
+- Keep answers clear, concise, and helpful.
+- Use headings like 'Display', 'Performance', 'Memory & Storage', 'Camera', 'Battery', 'Connectivity', 'Other Features'
+- Use bullet points (•)
+- **Bold all keywords** (Type, Size, RAM, Chipset, CPU, Resolution, Capacity, etc.)
+- Proper spacing
+- No tables
+- Add a helpful closing note
+
+Question: {prompt}
+"""
+
+        response = gemini_model.generate_content(full_prompt)
+        answer = response.text if hasattr(response, "text") else "Sorry, I couldn't generate a response."
+
+    except Exception as e:
+        answer = f"Error: {str(e)}"
+
+    # Step 3: final edit with formatted answer
+    formatted_answer = format_response(answer)
+    await progress_msg.edit_text(
+        formatted_answer,
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
 
 
 
@@ -5462,6 +5462,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
