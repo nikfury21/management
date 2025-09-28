@@ -1194,13 +1194,16 @@ async def set_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- PTB Bot: /ping handler ---
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in MODS:
+        return  # 🔇 silently ignore non-mods
+
     start = datetime.now()
     msg = await update.message.reply_text("📡 Pinging...")
     end = datetime.now()
 
     latency = (end - start).total_seconds()
 
-    # uptime uses BOT_START_TIME (already defined at top)
     uptime = datetime.now() - datetime.fromtimestamp(BOT_START_TIME)
     days = uptime.days
     hours, remainder = divmod(uptime.seconds, 3600)
@@ -1211,6 +1214,7 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏱ Latency: {latency:.3f} s\n"
         f"⏳ Uptime: {days}d {hours}h {minutes}m {seconds}s"
     )
+
 
 async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -5458,6 +5462,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
