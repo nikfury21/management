@@ -407,19 +407,52 @@ else:
 HARD_CODED_PROMPT = "You are a helpful intelligent and updated female assistant named 𝖣𝗂𝗄𝗌𝗁𝗂𝗄𝖺 ᥫ᭡. Please answer creatively and politely.Try to use shorter replies.: " #can use any prompt 
 
 
-TAVILY_API_KEY = "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"
+# 🔑 Support multiple Tavily API keys (rotation)
+TAVILY_KEYS = [
+    "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",
+    "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",
+    "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",
+    "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",
+    "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",
+    # add more if needed
+]
+_tavily_index = 0  # internal pointer
+
 
 def tavily_search(query, max_results=3):
-    url = "https://api.tavily.com/search"
-    payload = {
-        "query": query,
-        "api_key": TAVILY_API_KEY,
-        "max_results": max_results
-    }
-    resp = requests.post(url, json=payload)
-    resp.raise_for_status()
-    data = resp.json()
-    return "\n".join([r["content"] for r in data.get("results", [])])
+    global _tavily_index
+
+    for _ in range(len(TAVILY_KEYS)):
+        key = TAVILY_KEYS[_tavily_index]
+
+        url = "https://api.tavily.com/search"
+        payload = {
+            "query": query,
+            "api_key": key,
+            "max_results": max_results
+        }
+
+        try:
+            resp = requests.post(url, json=payload, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+
+            # ✅ advance pointer for next request
+            _tavily_index = (_tavily_index + 1) % len(TAVILY_KEYS)
+
+            return "\n".join([r["content"] for r in data.get("results", [])])
+
+        except requests.HTTPError as e:
+            # if quota exhausted, try next key
+            if resp.status_code in (429, 403):
+                print(f"[Tavily] Key {_tavily_index} exhausted, switching...")
+                _tavily_index = (_tavily_index + 1) % len(TAVILY_KEYS)
+                continue
+            raise e
+
+    # If all keys fail
+    raise RuntimeError("⚠️ All Tavily API keys exhausted or invalid.")
+
 
 def save_filters():
     with open(FILTERS_FILE, "w") as f:
@@ -1522,44 +1555,54 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /ask <your question> or reply to a message with /ask")
         return
 
-    try:
-        search_results = tavily_search(prompt)
+        try:
+            # Step 1: send initial progress message
+            progress_msg = await update.message.reply_text(
+                "<b><i>Fetching response from API...</i></b>",
+                parse_mode="HTML"
+            )
+    
+            search_results = tavily_search(prompt)
+    
+            # Step 2: edit to formatting message
+            await progress_msg.edit_text(
+                "<b><i>Formatting response in a user friendly format...</i></b>",
+                parse_mode="HTML"
+            )
+    
+            full_prompt = f"""
+    Based on the following search excerpts, generate a detailed, structured specification:
+    
+    {search_results}
+    
+    Instructions:
+    - You are Dikshika ᥫ᭡, a polite and helpful assistant.
+    - Use structured formatting with ✘ headings and • bullet points in your response.
+    - Keep answers clear, concise, and helpful.
+    - Use headings like 'Display', 'Performance', 'Memory & Storage', 'Camera', 'Battery', 'Connectivity', 'Other Features'
+    - Use bullet points (•)
+    - **Bold all keywords** (Type, Size, RAM, Chipset, CPU, Resolution, Capacity, etc.)
+    - Proper spacing
+    - No tables
+    - Add a helpful closing note
+    
+    Question: {prompt}
+    """
+    
+            response = gemini_model.generate_content(full_prompt)
+            answer = response.text if hasattr(response, "text") else "Sorry, I couldn't generate a response."
+    
+        except Exception as e:
+            answer = f"Error: {str(e)}"
+    
+        # Step 3: final edit with formatted answer
+        formatted_answer = format_response(answer)
+        await progress_msg.edit_text(
+            formatted_answer,
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
 
-        full_prompt = f"""
-Based on the following search excerpts, generate a detailed, structured specification:
-
-{search_results}
-
-Instructions:
-- You are Dikshika ᥫ᭡, a polite and helpful assistant.
-- Use structured formatting with ✘ headings and • bullet points in your response.
-- Keep answers clear, concise, and helpful.
-- Use headings like 'Display', 'Performance', 'Memory & Storage', 'Camera', 'Battery', 'Connectivity', 'Other Features'
-- Use bullet points (•)
-- **Bold all keywords** (Type, Size, RAM, Chipset, CPU, Resolution, Capacity, etc.)
-- Proper spacing
-- No tables
-- Add a helpful closing note
-
-Question: {prompt}
-"""
-
-        response = gemini_model.generate_content(full_prompt)
-        answer = response.text if hasattr(response, "text") else "Sorry, I couldn't generate a response."
-
-    except Exception as e:
-        answer = f"Error: {str(e)}"
-
-    # Format safely for Telegram
-    formatted_answer = format_response(answer)
-
-    reply_to_id = update.message.message_id if not update.message.reply_to_message else update.message.reply_to_message.message_id
-    await update.message.reply_text(
-        formatted_answer,
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_to_message_id=reply_to_id
-    )
 
 
 
@@ -5415,6 +5458,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
