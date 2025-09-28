@@ -1574,21 +1574,46 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
+        # === Dynamic style instructions ===
+        if any(word in prompt.lower() for word in ["specs", "specifications", "specification" ]):
+            style_instructions = """
+            - Use clear sections with ✘ headings and • bullet points.
+            - Keep answers structured, concise, and polite.
+            - Format like a device specification sheet.
+            - Use headings like 'Display', 'Performance', 'Memory & Storage', 'Camera', 'Battery', 'Connectivity', 'Other Features'.
+            - Use bullet points (•).
+            - Bold keywords (Type, Size, RAM, Chipset, etc.).
+            - Keep it concise and clear.
+            """
+        elif any(word in prompt.lower() for word in ["minecraft", "enchant", "netherite", "diamond", "armor", "tool"]):
+            style_instructions = """
+            - Use clear sections with ✘ headings and • bullet points.
+            - Keep answers structured, concise, and polite.
+            - List the best possible enchantments with their maximum levels.
+            - Use a heading like 'Best Enchantments for <Item>'.
+            - Use bullet points (•).
+            - Bold enchantment names (Protection IV, Mending I, etc.).
+            - Add short explanations only if relevant.
+            """
+        else:
+            style_instructions = """
+            - You are Dikshika ᥫ᭡, a polite and helpful assistant.
+            - Use structured formatting with ✘ headings and • bullet points in your response.
+            - Keep answers clear, concise, and helpful.
+            - Use bullet points (•)
+            - Proper spacing
+            - No tables
+            - Add a helpful closing note
+            """
+
         full_prompt = f"""
-Based on the following search excerpts, generate a detailed, structured specification:
+Based on the following search excerpts, answer the question:
 
 {search_results}
 
 Instructions:
 - You are Dikshika ᥫ᭡, a polite and helpful assistant.
-- Use structured formatting with ✘ headings and • bullet points in your response.
-- Keep answers clear, concise, and helpful.
-- Use headings like 'Display', 'Performance', 'Memory & Storage', 'Camera', 'Battery', 'Connectivity', 'Other Features'
-- Use bullet points (•)
-- **Bold all keywords** (Type, Size, RAM, Chipset, CPU, Resolution, Capacity, etc.)
-- Proper spacing
-- No tables
-- Add a helpful closing note
+{style_instructions}
 
 Question: {prompt}
 """
@@ -1606,6 +1631,7 @@ Question: {prompt}
         parse_mode="HTML",
         disable_web_page_preview=True
     )
+
 
 
 
@@ -5462,6 +5488,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
