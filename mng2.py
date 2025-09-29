@@ -1553,16 +1553,7 @@ async def is_member_admin(chat, user_id: int) -> bool:
 
 
 
-def detect_intent(prompt: str) -> list[str]:
-    quick_prompt = f"""
-Classify the following user question into one or more of:
-[identity, chit_chat, specs, gaming, general].
 
-If multiple apply, return them comma separated.
-Question: "{prompt}"
-"""
-    resp = gemini_model.generate_content(quick_prompt)
-    return [x.strip().lower() for x in resp.text.split(",")]
 
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = ' '.join(context.args) if context.args else (
@@ -1582,71 +1573,36 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-        # === Intent detection ===
-        def detect_intent(question: str) -> list[str]:
-            quick_prompt = f"""
-Classify the following user question into one or more of:
-[identity, chit_chat, specs, gaming, general].
+        # === Let model decide if chat or factual ===
+        style_prompt = f"""
+You are Dikshika ᥫ᭡, a polite and helpful assistant.
 
-If multiple apply, return them comma separated.
-Question: "{question}"
+When answering:
+- If the user is chatting casually, reply in a short, warm, and friendly way (max 2–3 sentences).
+- If the user is asking for factual details (like phone specs, game tips, general info), 
+  provide a clear, structured response.
+- Use ✘ headings and • bullet points where possible.
+- For technical topics (like smartphones), give a **full specification sheet** 
+  with fields such as Display, Performance, Camera, Battery, Other Features, Price.
+- Always bold important terms (e.g., RAM, Battery, Chipset, Refresh Rate).
+- Keep tone polite, natural, and consistent.
+
+User question: "{prompt}"
 """
-            resp = gemini_model.generate_content(quick_prompt)
-            return [x.strip().lower() for x in resp.text.split(",")]
+        # The model generates style guidance + final tone rules
+        style_resp = gemini_model.generate_content(style_prompt)
+        style_instructions = style_resp.text if hasattr(style_resp, "text") else ""
 
-        intents = detect_intent(prompt)
+        # === Always try to search for factual grounding ===
+        search_results = tavily_search(prompt)
 
-        # === Search only if factual intent is present ===
-        search_results = ""
-        if any(x in intents for x in ["specs", "gaming", "general"]):
-            search_results = tavily_search(prompt)
-
-        # Step 2: build style instructions dynamically
-        style_instructions = ""
-
-        if "identity" in intents or "chit_chat" in intents:
-            style_instructions += """
-            - Start with a warm, short, friendly sentence as yourself (Dikshika ᥫ᭡).
-            - Example: "I’m Dikshika 💫. Here’s what I found:"
-            - Keep it under 2–3 sentences before factual details.
-            """
-
-        if "specs" in intents:
-            style_instructions += """
-            - Always give a **full specification sheet** for the device.
-            - Use clear sections with ✘ headings (Display, Performance, Camera, Battery, Other Features, Price).
-            - Each section must have multiple bullet points with details like size, type, resolution, refresh rate, chipset, RAM/storage, camera megapixels, battery capacity, charging, OS, dimensions, weight, price, etc.
-            - Bold important keywords (RAM, Battery, Chipset, Refresh Rate).
-            - Be as complete as possible (even if some details come from general knowledge + search snippets).
-            """
-
-
-        if "gaming" in intents:
-            style_instructions += """
-            - Provide the answer in a gamer-friendly way.
-            - Use clear sections with ✘ headings and • bullet points.
-            - If the question is about Minecraft, list the best enchantments/items with max levels.
-            - If it’s another game, explain strategies, items, or tips concisely.
-            - Bold important names (weapons, skills, enchantments, characters).
-            - Keep tone slightly casual but still informative.
-            """
-
-
-        if "general" in intents or not intents:
-            style_instructions += """
-            - Answer politely with clear structure.
-            - Use ✘ headings and • bullets where helpful.
-            - Keep it concise and easy to read.
-            """
-
-        # Step 3: final full prompt
+        # Step 2: final full prompt
         full_prompt = f"""
 Based on the following search excerpts, answer the question:
 
 {search_results}
 
 Instructions:
-- You are Dikshika ᥫ᭡, a polite and helpful assistant.
 {style_instructions}
 
 Question: {prompt}
@@ -1659,14 +1615,13 @@ Question: {prompt}
     except Exception as e:
         answer = f"Error: {str(e)}"
 
-    # Step 4: clean + send final response
+    # Step 3: clean + send final response
     formatted_answer = format_response(answer)
     await progress_msg.edit_text(
         formatted_answer,
         parse_mode="HTML",
         disable_web_page_preview=True
     )
-
 
 
 
@@ -5522,6 +5477,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
