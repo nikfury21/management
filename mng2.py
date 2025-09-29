@@ -1613,10 +1613,13 @@ Question: "{question}"
 
         if "specs" in intents:
             style_instructions += """
-            - Present details in sections with ✘ headings and • bullet points.
-            - Use device-spec style headings like 'Display', 'Performance', etc.
-            - Bold important keywords (RAM, Battery, Chipset).
+            - Always give a **full specification sheet** for the device.
+            - Use clear sections with ✘ headings (Display, Performance, Camera, Battery, Other Features, Price).
+            - Each section must have multiple bullet points with details like size, type, resolution, refresh rate, chipset, RAM/storage, camera megapixels, battery capacity, charging, OS, dimensions, weight, price, etc.
+            - Bold important keywords (RAM, Battery, Chipset, Refresh Rate).
+            - Be as complete as possible (even if some details come from general knowledge + search snippets).
             """
+
 
         if "gaming" in intents:
             style_instructions += """
@@ -5519,6 +5522,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
