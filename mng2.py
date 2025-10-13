@@ -4511,18 +4511,34 @@ async def calc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     expression = " ".join(context.args)
 
     if not expression:
-        await message.reply_text("⚠️ Usage: `/calc 5+2`", parse_mode=ParseMode.MARKDOWN)
+        await message.reply_text(
+            "⚠️ Usage: `/calc 5+2` or `/calc √9` or `/calc 2^3`",
+            parse_mode=ParseMode.MARKDOWN
+        )
         return
 
     try:
-        # Only allow safe characters: digits, operators, parentheses, decimal points, and spaces
-        if not re.match(r'^[0-9+\-*/().\s]+$', expression):
-            await message.reply_text("❌ Invalid characters in expression!")
+        # Allow ^ as exponent
+        expression = expression.replace("^", "**")
+
+        # Replace √9 → math.sqrt(9)
+        expression = re.sub(r'√\s*([0-9\.]+)', r'sqrt(\1)', expression)
+
+
+        # Define safe math environment
+        allowed_names = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
+        allowed_names.update({"abs": abs, "round": round})
+
+        # Validate input
+        if not re.match(r'^[0-9+\-*/().,^√% eE a-zA-Z\s]+$', expression):
+            await message.reply_text("❌ Invalid characters detected!")
             return
 
-        # Evaluate the expression safely
-        result = eval(expression, {"__builtins__": None}, {"math": math})
-        await message.reply_text(f"🧮 Result: `{result}`", parse_mode=ParseMode.MARKDOWN)
+        # Evaluate safely
+        result = eval(expression, {"__builtins__": None}, allowed_names)
+
+        await message.reply_text(f"🧮 *Result:* `{result}`", parse_mode=ParseMode.MARKDOWN)
+
     except Exception as e:
         await message.reply_text(f"❌ Error: {e}")
 
@@ -5527,6 +5543,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
