@@ -1743,13 +1743,12 @@ async def is_member_admin(chat, user_id: int) -> bool:
         return False
 
 
-
-
 async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Structured web-only specs fetcher (no Gemini, no sources shown).
-    Automatically detects device/engine/general queries,
-    filters junk lines, and formats output into clean structured sections.
+    Smart structured web-only fetcher.
+    Handles phones, laptops, and general device specs cleanly.
+    Filters junk, organizes info into precise sections.
+    No Gemini, no sources.
     """
     prompt = ' '.join(context.args) if context.args else (
         update.message.reply_to_message.text
@@ -1762,7 +1761,7 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     progress = await update.message.reply_text("<i>Fetching structured info...</i>", parse_mode="HTML")
 
     try:
-        # === Fetch web snippets ===
+        # === Fetch web data ===
         try:
             search_results = tavily_search_cached(prompt, max_results=6) or ""
         except Exception as e:
@@ -1777,25 +1776,27 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # === Clean + split ===
+        # === Clean text ===
         text = re.sub(r"\s+", " ", search_results.strip())
         lines = re.split(r"(?<=[.!?])\s+", text)
         clean_lines = []
         for l in lines:
             l = l.strip()
-            # Skip junk / links / promo lines
             if len(l) < 25 or len(l) > 250:
                 continue
             if re.search(r"(https?://|www\.|facebook|twitter|instagram|buy|click|comment|follow|blog|subscribe|offer|price in|₹|\$)", l, re.I):
                 continue
-            if re.search(r"^(source|read more|see also|visit)", l, re.I):
+            if re.search(r"(great performance|handle any task|powerful performance|designed for comfort|best choice|superior experience)", l, re.I):
                 continue
             clean_lines.append(l)
 
-        # === Intent detection ===
+        # === Intent classification ===
         low_text = text.lower()
-        is_device = any(k in low_text for k in [
-            "display", "screen", "inch", "smartphone", "camera", "battery", "ram", "storage", "processor", "snapdragon"
+        is_laptop = any(k in low_text for k in [
+            "laptop", "notebook", "macbook", "chromebook", "intel", "ryzen", "ssd", "hdd", "windows", "keyboard", "trackpad"
+        ])
+        is_phone = any(k in low_text for k in [
+            "smartphone", "display", "camera", "battery", "android", "ios", "funtouch", "snapdragon", "dimensity", "mobile", "screen"
         ])
         is_engine = any(k in low_text for k in [
             "engine", "horsepower", "hp", "torque", "displacement", "cc", "diesel", "petrol"
@@ -1804,21 +1805,26 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # === Section classifier ===
         def match_section(sentence):
             s = sentence.lower()
-            if any(k in s for k in ["display", "screen", "inch", "resolution", "refresh", "amoled", "oled", "lcd", "ppi"]):
+            # shared
+            if any(k in s for k in ["display", "screen", "inch", "resolution", "refresh", "amoled", "oled", "lcd", "ips", "ppi"]):
                 return "Display"
-            if any(k in s for k in ["processor", "chip", "cpu", "ghz", "performance", "gpu", "mediatek", "snapdragon", "m1", "m2", "dimensity"]):
+            if any(k in s for k in ["processor", "chip", "cpu", "ghz", "gpu", "intel", "ryzen", "mediatek", "snapdragon", "m1", "m2"]):
                 return "Performance"
+            if any(k in s for k in ["graphics", "gpu", "nvidia", "geforce", "rtx", "radeon"]):
+                return "Graphics"
             if any(k in s for k in ["camera", "megapixel", "mp", "lens", "selfie", "rear camera", "front camera", "optics"]):
                 return "Camera"
-            if any(k in s for k in ["battery", "mah", "charging", "fast charge", "watt", "endurance", "power backup"]):
+            if any(k in s for k in ["battery", "mah", "charging", "watt", "power adapter", "hours battery", "fast charge"]):
                 return "Battery"
-            if any(k in s for k in ["ram", "storage", "rom", "memory", "ufs", "lpddr", "expandable"]):
+            if any(k in s for k in ["ram", "storage", "rom", "memory", "ssd", "hdd", "ufs", "lpddr", "expandable"]):
                 return "Memory & Storage"
-            if any(k in s for k in ["wifi", "bluetooth", "5g", "4g", "nfc", "usb", "port", "jack", "type-c", "gps", "sim"]):
+            if any(k in s for k in ["wifi", "bluetooth", "5g", "4g", "nfc", "usb", "port", "jack", "hdmi", "ethernet", "type-c", "gps"]):
                 return "Connectivity"
             if any(k in s for k in ["speaker", "audio", "sound", "stereo", "dolby"]):
                 return "Audio"
-            if any(k in s for k in ["android", "ios", "windows", "macos", "os", "software", "ui", "version", "funtouch"]):
+            if any(k in s for k in ["keyboard", "trackpad", "touchpad", "keys", "backlit"]):
+                return "Keyboard & Input"
+            if any(k in s for k in ["android", "ios", "windows", "macos", "chromeos", "software", "ui", "version", "os"]):
                 return "Software & OS"
             if any(k in s for k in ["sensor", "fingerprint", "gyro", "accelerometer", "compass", "headphone"]):
                 return "Sensors & Ports"
@@ -1828,13 +1834,11 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return "Release Date"
             if any(k in s for k in ["price", "variant", "version", "model"]):
                 return "Variants"
-            if any(k in s for k in ["review", "summary", "overall", "features", "highlight"]):
-                return "Notes"
             if any(k in s for k in ["engine", "motor", "hp", "horsepower", "torque", "cc", "displacement", "fuel", "diesel", "petrol", "kw"]):
                 return "Engine"
             return None
 
-        # === Group sentences by section ===
+        # === Group lines by section ===
         grouped = {}
         for l in clean_lines:
             sec = match_section(l)
@@ -1843,27 +1847,30 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if l not in grouped[sec] and len(grouped[sec]) < 5:
                     grouped[sec].append(l)
 
-        # === Ordered output ===
-        order = [
-            "Display", "Performance", "Camera", "Battery",
-            "Memory & Storage", "Connectivity", "Audio",
-            "Software & OS", "Sensors & Ports", "Dimensions & Weight",
-            "Release Date", "Variants", "Notes", "Engine"
-        ]
+        # === Section order (phones/laptops differ slightly) ===
+        order = (
+            ["Display", "Performance", "Graphics", "Memory & Storage", "Connectivity", "Audio", "Keyboard & Input",
+             "Software & OS", "Dimensions & Weight", "Battery", "Release Date", "Variants", "Engine"]
+            if is_laptop
+            else ["Display", "Performance", "Camera", "Battery", "Memory & Storage", "Connectivity", "Audio",
+                  "Software & OS", "Sensors & Ports", "Dimensions & Weight", "Release Date", "Variants", "Engine"]
+        )
 
-        # === Quick Specs summary ===
+        # === Quick Specs ===
         quick = []
         if "Display" in grouped:
-            quick.append(re.sub(r"vivo|samsung|apple|xiaomi|oneplus|realme", "", grouped["Display"][0], flags=re.I))
+            quick.append(re.sub(r"acer|vivo|samsung|apple|xiaomi|oneplus|realme", "", grouped["Display"][0], flags=re.I))
         if "Performance" in grouped:
             quick.append(re.sub(r"powered by", "", grouped["Performance"][0], flags=re.I))
+        if "Graphics" in grouped:
+            quick.append(grouped["Graphics"][0])
         if "Camera" in grouped:
-            quick.append(re.sub(r"for optics,|camera|megapixel|mp", "", grouped["Camera"][0], flags=re.I))
+            quick.append(re.sub(r"camera|megapixel|mp", "", grouped["Camera"][0], flags=re.I))
         if "Battery" in grouped:
             quick.append(grouped["Battery"][0])
         quick_line = " • ".join(quick[:3]) if quick else ""
 
-        # === Build final message ===
+        # === Build output ===
         output = []
         output.append(f"📌 <b>Query:</b> {prompt}\n")
         if quick_line:
@@ -1876,7 +1883,10 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     output.append(f"• {item}")
                 output.append("────────────")
 
-        # === Send clean formatted message (no sources) ===
+        if len(output) <= 3:
+            output.append("❌ No detailed specifications found online for this device.")
+
+        # === Send result ===
         final_text = "\n".join(output)
         await progress.edit_text(final_text[:4000], parse_mode="HTML", disable_web_page_preview=True)
 
@@ -6188,6 +6198,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
