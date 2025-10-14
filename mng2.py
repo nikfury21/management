@@ -137,6 +137,7 @@ API_HASH = os.getenv("MNG_API_HASH")
 BOT_TOKEN = os.getenv("MNG_BOT_TOKEN")
 GOOGLE_KEY = os.environ.get("GOOGLE_KEY")
 GOOGLE_CX  = os.environ.get("GOOGLE_CX")
+OMDB_API_KEY = os.environ.get("OMDB_KEY")
 
 pyro_client = PyroClient(
     "pic_bot",
@@ -177,39 +178,111 @@ def get_next_gemini_model():
 import requests
 from bs4 import BeautifulSoup
 
-def fetch_gsmarena_specs(device_name: str) -> str:
-    """Fetch and format specs from GSMArena with dynamic section handling."""
+
+
+def scrape_gsmarena_specs(query: str):
+    """Try fetching specs from GSMArena."""
     try:
-        search_url = f"https://www.gsmarena.com/results.php3?sQuickSearch=yes&sName={device_name.replace(' ', '+')}"
-        html = requests.get(search_url, timeout=15).text
+        search_url = f"https://www.gsmarena.com/results.php3?sQuickSearch=yes&sName={query}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        html = requests.get(search_url, headers=headers, timeout=10).text
         soup = BeautifulSoup(html, "html.parser")
-        result = soup.select_one(".makers a")
-        if not result:
-            return ""
-        phone_url = "https://www.gsmarena.com/" + result["href"]
-        page = requests.get(phone_url, timeout=15).text
-        psoup = BeautifulSoup(page, "html.parser")
-        title = psoup.find("h1").get_text(strip=True)
-        tables = psoup.select("table")
-        sections = {}
-        for t in tables:
-            h2 = t.find_previous("h2")
-            section = h2.get_text(strip=True) if h2 else "Other"
-            rows = []
-            for row in t.select("tr"):
-                th, td = row.find("th"), row.find("td")
+
+        result_link = soup.select_one(".makers a")
+        if not result_link:
+            raise Exception("No GSMArena result found")
+
+        phone_url = "https://www.gsmarena.com/" + result_link["href"]
+        phone_html = requests.get(phone_url, headers=headers, timeout=10).text
+        phone_soup = BeautifulSoup(phone_html, "html.parser")
+
+        specs = []
+        for table in phone_soup.select("table"):
+            cat = table.find_previous("h2")
+            if not cat:
+                continue
+            cat_name = cat.get_text(strip=True)
+            specs.append(f"✦ {cat_name}")
+            for tr in table.find_all("tr"):
+                th = tr.find("th")
+                td = tr.find("td")
                 if th and td:
-                    rows.append(f"• {th.get_text(strip=True)}: {td.get_text(' ', strip=True)}")
-            if rows:
-                sections[section] = rows
-        result_lines = [f"Here’s the full detailed specs of the {title}:\n"]
-        for sec, items in sections.items():
-            result_lines.append(f"✦ {sec}")
-            result_lines.extend(items)
-            result_lines.append("")
-        return "\n".join(result_lines).strip()
-    except Exception:
-        return ""
+                    specs.append(f"• {th.get_text(strip=True)}: {td.get_text(' ', strip=True)}")
+            specs.append("")
+        if not specs:
+            raise Exception("Empty specs table")
+        return "\n".join(specs[:80])
+
+    except Exception as e:
+        print(f"[GSMArena error] {e}")
+        return None
+
+
+def scrape_device_specifications(query: str):
+    """Fallback: Try fetching from DeviceSpecifications.com."""
+    try:
+        url = f"https://www.devicespecifications.com/en/search/?query={query.replace(' ', '+')}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        html = requests.get(url, headers=headers, timeout=10).text
+        soup = BeautifulSoup(html, "html.parser")
+
+        link = soup.select_one(".model-listing-container-80 h3 a")
+        if not link:
+            raise Exception("No device found on DeviceSpecifications")
+
+        page_url = "https://www.devicespecifications.com" + link["href"]
+        page_html = requests.get(page_url, headers=headers, timeout=10).text
+        page_soup = BeautifulSoup(page_html, "html.parser")
+
+        specs = []
+        for block in page_soup.select(".article-info"):
+            header = block.find("h3")
+            if header:
+                specs.append(f"✦ {header.get_text(strip=True)}")
+            for li in block.select("li"):
+                specs.append(f"• {li.get_text(strip=True)}")
+            specs.append("")
+        if not specs:
+            raise Exception("No specs parsed")
+        return "\n".join(specs[:80])
+    except Exception as e:
+        print(f"[DeviceSpecifications error] {e}")
+        return None
+
+
+def scrape_91mobiles_specs(query: str):
+    """Second fallback: Try fetching specs from 91mobiles."""
+    try:
+        url = f"https://www.91mobiles.com/search_page.php?search={query.replace(' ', '+')}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        html = requests.get(url, headers=headers, timeout=10).text
+        soup = BeautifulSoup(html, "html.parser")
+
+        link = soup.select_one(".finder_snipet_wrap a")
+        if not link:
+            raise Exception("No 91mobiles result found")
+
+        page_url = "https://www.91mobiles.com" + link["href"]
+        page_html = requests.get(page_url, headers=headers, timeout=10).text
+        page_soup = BeautifulSoup(page_html, "html.parser")
+
+        specs = []
+        for sec in page_soup.select(".spec_box"):
+            title = sec.find("h4")
+            if title:
+                specs.append(f"✦ {title.get_text(strip=True)}")
+            for row in sec.select("li"):
+                specs.append(f"• {row.get_text(strip=True)}")
+            specs.append("")
+        if not specs:
+            raise Exception("Empty specs section")
+        return "\n".join(specs[:80])
+
+    except Exception as e:
+        print(f"[91mobiles error] {e}")
+        return None
+
+
 
 
 def safe_generate(model, prompt, retries=3):
@@ -1701,17 +1774,26 @@ Query: "{prompt}"
         except Exception:
             classification = "other"
 
-        # === Step 2: If device specs → scrape GSMArena ===
+        # === Step 2: If device specs → scrape specs ===
         if "gsmarena" in classification:
-            gsm_specs = fetch_gsmarena_specs(prompt)
-            if gsm_specs:
-                await progress.edit_text(gsm_specs[:4000], disable_web_page_preview=True)
-                return
-            fallback_note = "❌ Not found on GSMArena. Showing AI result.\n\n"
-        else:
-            fallback_note = ""
+            query = prompt
+
+            specs_text = scrape_gsmarena_specs(query)
+
+            if not specs_text:
+                specs_text = scrape_device_specifications(query)
+
+            if not specs_text:
+                specs_text = scrape_91mobiles_specs(query)
+
+            if not specs_text:
+                specs_text = f"❌ No detailed specs found online for {query.title()}."
+
+            await progress.edit_text(specs_text[:4000], disable_web_page_preview=True)
+            return  # ✅ stop here after sending specs
 
         # === Step 3: normal Tavily + AI response ===
+        fallback_note = ""
         search_results = tavily_search_cached(prompt, max_results=2)
         style_instructions = """
 You are Jarvis, a polite and professional AI assistant.
@@ -2561,7 +2643,150 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             disable_notification=True,
         )
 
+# ---------------- MOVIE COMMAND ----------------
+async def movie_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /movie <movie name>")
+        return
 
+    query = " ".join(context.args)
+    url = f"http://www.omdbapi.com/?t={query}&plot=full&apikey={OMDB_API_KEY}"
+    response = requests.get(url).json()
+
+    if response.get("Response") == "False":
+        await update.message.reply_text("❌ Movie not found.")
+        return
+
+    await send_movie_page(update, context, response)
+
+
+# ---------------- MOVIE PAGE ----------------
+async def send_movie_page(update_or_query, context, movie, edit=False):
+    """Sends or edits the main movie info page"""
+    title = movie.get("Title", "N/A")
+    year = movie.get("Year", "N/A")
+    rated = movie.get("Rated", "N/A")
+    released = movie.get("Released", "N/A")
+    runtime = movie.get("Runtime", "N/A")
+    genre = movie.get("Genre", "N/A")
+    director = movie.get("Director", "N/A")
+    writer = movie.get("Writer", "N/A")
+    actors = movie.get("Actors", "N/A")
+    plot = movie.get("Plot", "N/A")
+    language = movie.get("Language", "N/A")
+    country = movie.get("Country", "N/A")
+    awards = movie.get("Awards", "N/A")
+    imdb_rating = movie.get("imdbRating", "N/A")
+    imdb_id = movie.get("imdbID", "")
+    poster = movie.get("Poster", "N/A")
+
+    trailer_link = f"https://www.youtube.com/results?search_query={title}+{year}+trailer"
+
+    caption = (
+        f"[🎬]<b>{title}</b> | {year}\n"
+        f"<b>ID:</b> <code>{imdb_id}</code>\n"
+        f"➤ <b>RATED:</b> <code>{rated}</code>\n"
+        f"➤ <b>RUNTIME:</b> <code>{runtime}</code>\n"
+        f"➤ <b>GENRE:</b> <code>{genre}</code>\n"
+        f"➤ <b>DIRECTOR:</b> <code>{director}</code>\n"
+        f"➤ <b>WRITER:</b> <code>{writer}</code>\n"
+        f"➤ <b>CAST:</b> <code>{actors}</code>\n"
+        f"➤ <b>LANGUAGE:</b> <code>{language}</code>\n"
+        f"➤ <b>COUNTRY:</b> <code>{country}</code>\n"
+        f"➤ <b>AWARDS:</b> <code>{awards}</code>\n"
+        f"➤ <b>RATING:</b> <code>{imdb_rating}⭐</code>\n"
+        f"➤ <b>RELEASED:</b> <code>{released}</code>\n\n"
+        f"📝 <b>PLOT:</b> {plot[:250]}{'...' if len(plot) > 250 else ''}\n\n"
+        f'🎥 <a href="{trailer_link}">Trailer</a>'
+    )
+
+    buttons = [
+        [InlineKeyboardButton("📜 Full Plot", callback_data=f"movie_plot:{imdb_id}")],
+        [InlineKeyboardButton("🎭 Characters", callback_data=f"movie_cast:{imdb_id}")],
+    ]
+    imdb_url = f"https://www.imdb.com/title/{imdb_id}"
+    buttons.append([InlineKeyboardButton("⭐ IMDb", url=imdb_url)])
+    markup = InlineKeyboardMarkup(buttons)
+
+    if edit:
+        await update_or_query.edit_message_caption(
+            caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup
+        )
+    else:
+        if poster and poster != "N/A":
+            await update_or_query.message.reply_photo(
+                photo=poster,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                reply_markup=markup,
+            )
+        else:
+            await update_or_query.message.reply_text(
+                caption, parse_mode=ParseMode.HTML, reply_markup=markup
+            )
+
+
+# ---------------- CALLBACK HANDLER ----------------
+async def movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    imdb_id = data.split(":")[1]
+
+    # Full Plot
+    if data.startswith("movie_plot:"):
+        url = f"http://www.omdbapi.com/?i={imdb_id}&plot=full&apikey={OMDB_API_KEY}"
+        movie = requests.get(url).json()
+        title = movie.get("Title", "Unknown")
+        plot = movie.get("Plot", "N/A")
+
+        buttons = [[InlineKeyboardButton("⬅️ Back", callback_data=f"movie_back:{imdb_id}")]]
+        markup = InlineKeyboardMarkup(buttons)
+
+        await query.edit_message_caption(
+            caption=f"📝 <b>{title}</b>\n\n{plot}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup,
+        )
+
+    # Back to Main Page
+    elif data.startswith("movie_back:"):
+        url = f"http://www.omdbapi.com/?i={imdb_id}&plot=short&apikey={OMDB_API_KEY}"
+        movie = requests.get(url).json()
+        await send_movie_page(query, context, movie, edit=True)
+
+    # Cast / Characters
+    elif data.startswith("movie_cast:"):
+        url = f"http://www.omdbapi.com/?i={imdb_id}&plot=short&apikey={OMDB_API_KEY}"
+        movie = requests.get(url).json()
+        title = movie.get("Title", "Unknown")
+        cast = movie.get("Actors", "")
+
+        if not cast:
+            await query.edit_message_caption(
+                caption="❌ No cast info available.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("⬅️ Back", callback_data=f"movie_back:{imdb_id}")]]
+                ),
+            )
+            return
+
+        actors = [a.strip() for a in cast.split(",")]
+        caption = f"🎭 <b>Characters / Cast - {title}</b>\n\n"
+
+        for actor in actors:
+            search_url = f"https://www.google.com/search?q={actor.replace(' ', '+')}+actor"
+            caption += f"• <a href='{search_url}'><b>{actor}</b></a>\n"
+
+        markup = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("⬅️ Back", callback_data=f"movie_back:{imdb_id}")]]
+        )
+
+        await query.edit_message_caption(
+            caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup
+        )
 
 
 async def warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5857,6 +6082,9 @@ async def start_bots():
         application.add_handler(CommandHandler("mmf", memify))
         application.add_handler(CommandHandler("mms", memify))
         application.add_handler(CommandHandler("ping", ping_command))
+        application.add_handler(CommandHandler("movie", movie_command))
+        application.add_handler(CallbackQueryHandler(movie_callback, pattern=r"^movie_"))
+
 
         application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, edited_message_handler, block=False), group=2)
 
@@ -5903,7 +6131,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
