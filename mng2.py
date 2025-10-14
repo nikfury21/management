@@ -7,6 +7,7 @@ import sys
 import asyncio
 from pyrogram.enums import ChatMemberStatus
 import sys, asyncio
+from telegram import InputMediaDocument
 
 
 
@@ -128,6 +129,8 @@ from groq import Client
 API_ID = int(os.getenv("MNG_API_ID"))
 API_HASH = os.getenv("MNG_API_HASH")
 BOT_TOKEN = os.getenv("MNG_BOT_TOKEN")
+GOOGLE_KEY = os.environ.get("GOOGLE_KEY")
+GOOGLE_CX  = os.environ.get("GOOGLE_CX")
 
 pyro_client = PyroClient(
     "pic_bot",
@@ -2036,14 +2039,28 @@ def format_name(user):
     name = f"{getattr(user, 'first_name', '') or ''} {getattr(user, 'last_name', '') or ''}".strip()
     return name or "Unknown"
 
-# === Command Handlers ===
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Existing start behavior + deep-link support for find_ query."""
     user = update.effective_user
-    REGISTERED_USERS.add(user.id)  # mark user as registered
+    REGISTERED_USERS.add(user.id)  # keep your existing registration behavior
     args = context.args
 
-    # === Captcha deep-link ===
+    # ---- New: handle deep-link start=find_<query> to auto-run /find ----
+    if args and args[0].startswith("find_"):
+        # reconstruct query: /start find_my_search_terms_here
+        q = args[0].replace("find_", "").replace("_", " ").strip()
+        # emulate context.args for find_command: use [query] so find_command sees it in private
+        # Ensure we set context.args to the query only for the call
+        previous_args = context.args
+        try:
+            context.args = [q]
+            # If this start is in a private chat, call find_command directly
+            await find_command(update, context)
+        finally:
+            context.args = previous_args
+        return
+
+    # === Captcha deep-link (existing logic) ===
     if args and args[0].startswith("cap_"):
         try:
             _, cid, uid = args[0].split("_", 2)
@@ -2051,14 +2068,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_id = int(uid)
         except Exception:
             return await update.message.reply_text("⚠️ Invalid captcha link.")
-
         if user.id != user_id:
             return await update.message.reply_text("⚠️ This captcha isn’t for you.")
-
-        # Generate captcha question
         q, ans = _make_captcha()
         captcha_state[(chat_id, user_id)] = {"answer": ans, "tries": 0, "question": q}
-
         kb = _build_9_options_keyboard(chat_id, user_id, ans)
         return await update.message.reply_text(
             f"Solve to unmute:\n<b>{q} = ?</b>\n\nYou have 3 tries.",
@@ -2066,14 +2079,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=kb
         )
 
-    # === Kang registration logic ===
+    # === Kang registration logic (existing) ===
     if args and args[0] == "kang":
-        await update.message.reply_text(
-            "✅ You’re registered! Now go back and use /kang again."
-        )
+        await update.message.reply_text("✅ You’re registered! Now go back and use /kang again.")
         return
 
-    # ✅ Auto-send help when in private chat
+    # === Existing: auto-send help in PM or message in groups ===
     if update.effective_chat.type == "private":
         await help_command(update, context)
     else:
@@ -2081,6 +2092,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👋 Hi! I’m your group management bot.\n\n"
             "Add me in your group as admin and enjoy the wholesome sets of useful codes."
         )
+
 
 
 
@@ -2167,6 +2179,98 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         help_text = "Available commands:\n" + "\n".join(commands)
         await update.message.reply_text(help_text, parse_mode="HTML")
+
+# ==== Image search helpers & /find command ====
+import logging, requests
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+def google_image_search(query, count=5):
+    """Return list of image URLs using Google Custom Search JSON API"""
+    if not GOOGLE_KEY or not GOOGLE_CX:
+        logging.warning("Google keys not configured.")
+        return []
+    try:
+        url = "https://www.googleapis.com/customsearch/v1"
+        params = {
+            "q": query,
+            "cx": GOOGLE_CX,
+            "key": GOOGLE_KEY,
+            "searchType": "image",
+            "num": count,
+            "safe": "active",
+            "imgSize": "xxlarge",
+            "imgType": "photo"
+        }
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return [item["link"] for item in data.get("items", [])]
+    except Exception as e:
+        logging.warning(f"Google search failed: {e}")
+        return []
+
+def lexica_search(query, count=5):
+    """Fallback for art/anime images using lexica.art (if Google misses)"""
+    try:
+        r = requests.get(f"https://lexica.art/api/v1/search?q={query}", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return [img["src"] for img in data.get("images", [])[:count]]
+    except Exception as e:
+        logging.warning(f"Lexica search failed: {e}")
+        return []
+
+async def find_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Usage: /find [number] <query> — sends images to user's DM"""
+    user = update.effective_user
+    args = context.args
+
+    if not args:
+        await update.message.reply_text("Usage: /find [number] <query>")
+        return
+
+    # parse count
+    if args[0].isdigit():
+        count = min(max(int(args[0]), 1), 10)
+        query = " ".join(args[1:]).strip()
+    else:
+        count = 5
+        query = " ".join(args).strip()
+
+    if not query:
+        await update.message.reply_text("⚠️ Please provide a search term.")
+        return
+
+    # try Google, fallback to lexica
+    results = google_image_search(query, count)
+    if not results:
+        results = lexica_search(query, count)
+
+    if not results:
+        await update.message.reply_text("❌ No results found.")
+        return
+
+    # Try to DM user
+    try:
+        await context.bot.send_message(chat_id=user.id, text=f"📩 Sending {len(results)} images for '{query}'")
+        # if only one, send as document/photo; otherwise send as media_group
+        if len(results) == 1:
+            await context.bot.send_document(chat_id=user.id, document=results[0], caption=query)
+        else:
+            media_group = [InputMediaDocument(media=url, caption=query if i == 0 else None)
+                           for i, url in enumerate(results)]
+            await context.bot.send_media_group(chat_id=user.id, media=media_group)
+
+        # if command used in group, notify there
+        if update.effective_chat.id != user.id:
+            await update.message.reply_text("✅ Sent to your DMs!")
+
+    except Exception:
+        # Can't DM — send deep-link to start the bot in PM
+        bot_username = (await context.bot.get_me()).username
+        deep_link = f"https://t.me/{bot_username}?start=find_{query.replace(' ', '_')}"
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("👉 Start me in DM", url=deep_link)]])
+        await update.message.reply_text("⚠️ I can only send images in DM. Start me in DM first.", reply_markup=keyboard)
 
 
 def escape_md(text: str) -> str:
@@ -5467,6 +5571,7 @@ async def start_bots():
         application.add_handler(CommandHandler("translate", translate_list))
         application.add_handler(CommandHandler("pp", pp_command))
         application.add_handler(CommandHandler("calc", calc_command))
+        application.add_handler(CommandHandler("find", find_command))
         application.add_handler(CommandHandler("report", report_command))
         application.add_handler(CommandHandler("anime", anime_command))
         application.add_handler(CallbackQueryHandler(anime_callback, pattern="^anime_"))
@@ -5543,6 +5648,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
