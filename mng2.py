@@ -2310,27 +2310,18 @@ async def find_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ No results found.")
         return
 
-    # Try to DM user
-    try:
-        await context.bot.send_message(chat_id=user.id, text=f"📩 Sending {len(results)} images for '{query}'")
-        # if only one, send as document/photo; otherwise send as media_group
-        if len(results) == 1:
-            await context.bot.send_document(chat_id=user.id, document=results[0], caption=query)
-        else:
-            media_group = [InputMediaDocument(media=url, caption=query if i == 0 else None)
-                           for i, url in enumerate(results)]
-            await context.bot.send_media_group(chat_id=user.id, media=media_group)
+    # Send images directly in chat (group or DM)
+    chat_id = update.effective_chat.id
 
-        # if command used in group, notify there
-        if update.effective_chat.id != user.id:
-            await update.message.reply_text("✅ Sent to your DMs!")
+    await update.message.reply_text(f"📩 Sending {len(results)} images for '{query}'")
 
-    except Exception:
-        # Can't DM — send deep-link to start the bot in PM
-        bot_username = (await context.bot.get_me()).username
-        deep_link = f"https://t.me/{bot_username}?start=find_{query.replace(' ', '_')}"
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("👉 Start me in DM", url=deep_link)]])
-        await update.message.reply_text("⚠️ I can only send images in DM. Start me in DM first.", reply_markup=keyboard)
+    if len(results) == 1:
+        await context.bot.send_photo(chat_id=chat_id, photo=results[0], caption=query)
+    else:
+        media_group = [InputMediaPhoto(media=url, caption=query if i == 0 else None)
+                    for i, url in enumerate(results)]
+        await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+
 
 
 def escape_md(text: str) -> str:
@@ -3660,11 +3651,17 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             should_end_afk = True
 
         if should_end_afk:
-            # remove AFK now
-            afk_data = afk_users.pop(sender_id, None)
+            # remove only that chat from AFK
+            if current_chat in afk_data.get("chats", set()):
+                afk_data["chats"].discard(current_chat)
+            # if no chats left, end AFK completely
+            if not afk_data.get("chats"):
+                afk_data = afk_users.pop(sender_id, None)
+            else:
+                afk_users[sender_id] = afk_data
         else:
-            # do not end AFK for other chats; skip the "back" message
             afk_data = None
+
 
         if afk_data:
             duration = datetime.utcnow() - afk_data["time"]
@@ -5808,31 +5805,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
