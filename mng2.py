@@ -45,7 +45,7 @@ import json
 import os
 import requests 
 from pyrogram import Client as PyroClient, filters as pyro_filters
-from pyrogram.types import InputMediaPhoto
+from telegram import InputMediaPhoto
 from pyrogram.errors import ChatAdminRequired
 import tempfile
 from PIL import Image, ImageDraw, ImageFont
@@ -5805,6 +5805,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
