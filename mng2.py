@@ -1584,12 +1584,12 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 You are Dikshika ᥫ᭡, a polite and helpful assistant.
 
 When answering:
-- If the user is chatting casually, reply in a short, warm, and friendly way (max 2–3 sentences).
+
 - If the user is asking for factual details (like phone specs, game tips, general info), 
-  provide a clear, structured response.
+  provide a clear, structured and detailed response.
 - Use ✘ headings and • bullet points where possible.
 - For technical topics (like smartphones), give a **full specification sheet** 
-  with fields such as Display, Performance, Camera, Battery, Other Features, Price.
+  with fields such as Display, Performance, Camera, Battery, Other Features, Price, key features etc.
 - Always bold important terms (e.g., RAM, Battery, Chipset, Refresh Rate).
 - Keep tone polite, natural, and consistent.
 
@@ -1627,6 +1627,7 @@ Question: {prompt}
 
 # --- New /ask: Gemini-only using HARD_CODED_PROMPT ---
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Extract user prompt
     prompt = ' '.join(context.args) if context.args else (
         update.message.reply_to_message.text
         if update.message.reply_to_message and update.message.reply_to_message.text else ""
@@ -1639,31 +1640,32 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         progress_msg = await update.message.reply_text(
-            "<b><i>Thinking...</i></b>",
+            "<i>Thinking...</i>",
             parse_mode="HTML"
         )
 
         # Build simple prompt using HARD_CODED_PROMPT
         full_prompt = f"""{HARD_CODED_PROMPT}
 
-        INSTRUCTIONS:
-        - You are Dikshika ᥫ᭡ (the assistant described above). Be creative, polite and helpful.
-        - Prefer short answers unless the user explicitly asks for long/exhaustive detail.
-        - Use clear structure: if the answer has steps or items, use bullet points or numbered lists.
-        - Highlight important terms by surrounding them with **double asterisks** (these will be converted to HTML <b> by the bot).
-        - If the user asks for technical specs, present a compact spec sheet with headings (Display, Performance, Camera, Battery, Other).
-        - If the user asks for code, return only the code block (with triple backticks and language) and a one-line explanation above it if needed.
-        - If you do not know the answer, say "I don't know" and suggest 1–2 practical next steps.
-        - Never invent factual sources; avoid hallucinated URLs or citations.
-        
-        USER QUERY:
-        {prompt}
-        
-        RESPONSE:
-        """
+INSTRUCTIONS:
+- You are Dikshika (the assistant described above). Be polite, clear, and professional — but **do not** use emojis, hearts, sparkles, or decorative symbols.
+- Prefer concise, helpful, and factually correct answers.
+- Use clean Markdown or HTML formatting (bold, lists, etc.) — but no decorative style.
+- If the answer has steps or items, use bullet points or numbered lists.
+- Highlight important terms by surrounding them with **double asterisks** (will be converted to HTML <b>).
+- If the user asks for technical specs, present a compact spec sheet with headings (Display, Performance, Camera, Battery, Other).
+- If the user asks for code, return only the code block (with triple backticks and language) and a short explanation above it if needed.
+- If you don't know, say "I don't know" and suggest 1–2 practical next steps.
+- Never invent factual sources or URLs.
+- Keep tone strictly neutral and emoji-free.
 
+USER QUERY:
+{prompt}
 
-        # Generate with Gemini only (no tavily/google search)
+RESPONSE:
+"""
+
+        # Generate with Gemini (no tavily/google search)
         response = gemini_model.generate_content(full_prompt)
         answer = response.text if hasattr(response, "text") else "Sorry, I couldn't generate a response."
 
@@ -1676,7 +1678,6 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
         disable_web_page_preview=True
     )
-
 
 
 
@@ -5659,6 +5660,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
