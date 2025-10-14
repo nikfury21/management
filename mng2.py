@@ -174,6 +174,42 @@ def get_next_gemini_model():
     print(f"[Gemini] Switched to key #{_current_gemini_index + 1}")
     genai.configure(api_key=new_key)
     return genai.GenerativeModel("gemini-2.5-flash-preview-09-2025")
+import requests
+from bs4 import BeautifulSoup
+
+def fetch_gsmarena_specs(device_name: str) -> str:
+    """Fetch and format specs from GSMArena with dynamic section handling."""
+    try:
+        search_url = f"https://www.gsmarena.com/results.php3?sQuickSearch=yes&sName={device_name.replace(' ', '+')}"
+        html = requests.get(search_url, timeout=15).text
+        soup = BeautifulSoup(html, "html.parser")
+        result = soup.select_one(".makers a")
+        if not result:
+            return ""
+        phone_url = "https://www.gsmarena.com/" + result["href"]
+        page = requests.get(phone_url, timeout=15).text
+        psoup = BeautifulSoup(page, "html.parser")
+        title = psoup.find("h1").get_text(strip=True)
+        tables = psoup.select("table")
+        sections = {}
+        for t in tables:
+            h2 = t.find_previous("h2")
+            section = h2.get_text(strip=True) if h2 else "Other"
+            rows = []
+            for row in t.select("tr"):
+                th, td = row.find("th"), row.find("td")
+                if th and td:
+                    rows.append(f"• {th.get_text(strip=True)}: {td.get_text(' ', strip=True)}")
+            if rows:
+                sections[section] = rows
+        result_lines = [f"Here’s the full detailed specs of the {title}:\n"]
+        for sec, items in sections.items():
+            result_lines.append(f"✦ {sec}")
+            result_lines.extend(items)
+            result_lines.append("")
+        return "\n".join(result_lines).strip()
+    except Exception:
+        return ""
 
 
 def safe_generate(model, prompt, retries=3):
@@ -1641,46 +1677,44 @@ import time
 from datetime import datetime
 
 async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Extract user prompt
     prompt = ' '.join(context.args) if context.args else (
         update.message.reply_to_message.text
         if update.message.reply_to_message and update.message.reply_to_message.text else ""
     )
     if not prompt:
-        await update.message.reply_text(
-            "Usage: /web <your question> or reply to a message with /web"
-        )
+        await update.message.reply_text("Usage: /web <your question> or reply to a message with /web")
         return
 
+    progress = await update.message.reply_text("<i>Fetching response...</i>", parse_mode="HTML")
+
     try:
-        progress_msg = await update.message.reply_text(
-            "<i>Fetching response...</i>",
-            parse_mode="HTML"
-        )
-
-        # === Step 1: Intent classification (AI-based, no hardcoded words) ===
+        # === Step 1: classify ===
         classify_prompt = f"""
-Determine whether the user is asking for **technical specifications of a mobile, laptop, tablet, or PC**.
-Respond with just one word:
-- "device" → if it's clearly about a gadget's specifications
-- "other" → otherwise
-
-User query: "{prompt}"
+Classify this query:
+- Reply "gsmarena" if the user clearly wants phone/tablet/laptop specs (technical device specs).
+- Reply "other" for everything else, including cars, engines, etc.
+Query: "{prompt}"
 """
         try:
-            classify_resp = safe_generate(gemini_model, classify_prompt)
-            classify_text = getattr(classify_resp, "text", "").strip().lower()
+            cls_resp = safe_generate(gemini_model, classify_prompt)
+            classification = getattr(cls_resp, "text", "").strip().lower()
         except Exception:
-            classify_text = "other"
+            classification = "other"
 
-        is_device_query = "device" in classify_text
+        # === Step 2: If device specs → scrape GSMArena ===
+        if "gsmarena" in classification:
+            gsm_specs = fetch_gsmarena_specs(prompt)
+            if gsm_specs:
+                await progress.edit_text(gsm_specs[:4000], disable_web_page_preview=True)
+                return
+            fallback_note = "❌ Not found on GSMArena. Showing AI result.\n\n"
+        else:
+            fallback_note = ""
 
-        # === Step 2: Get factual grounding ===
+        # === Step 3: normal Tavily + AI response ===
         search_results = tavily_search_cached(prompt, max_results=2)
-
-        # === Step 3: Style rules (consistent with other commands) ===
         style_instructions = """
-You are Dikshika, a polite and professional AI assistant.
+You are Jarvis, a polite and professional AI assistant.
 
 Tone and style rules:
 - Never use emojis or decorative symbols.
@@ -1690,94 +1724,25 @@ Tone and style rules:
 - Present info as simple lists with clear headings (✘ or section titles).
 - Always stay factual, concise, and under 1500–2000 characters.
 """
+        ai_prompt = f"""{style_instructions}
 
-        # === Step 4: Build main prompt based on detected type ===
-        if is_device_query:
-            # 📱 Gadget specification format
-            full_prompt = f"""
-{style_instructions}
-
-You are a knowledgeable tech assistant.
-
-The user asked about: "{prompt}"
-
-Here are factual search snippets:
+Search data:
 {search_results}
 
-Write a **complete, clean specification sheet** like GSMArena or NotebookCheck.
-Use this layout exactly (no extra emojis or symbols):
+User asked: "{prompt}"
 
-✘ Manufacturer : <brand>
-⦁ Release Date : <month year>
-
-✘ Display
-⦁ <size, type, resolution, refresh rate>
-
-✘ Processor & Performance
-⦁ <chipset, cores, GPU, RAM, storage>
-
-✘ Camera Setup
-⦁ <rear + front cameras, video>
-
-★ Battery & Charging
-⦁ <capacity, fast charging>
-
-✘ Build & Features
-⦁ <dimensions, weight, material, fingerprint, ports, etc.>
-
-✘ Connectivity
-⦁ <Wi-Fi, Bluetooth, GPS, 5G, NFC, etc.>
-
-✘ OS & Interface
-⦁ <Android/iOS/Windows/macOS version>
-
-✘ Sensors
-⦁ <sensor list>
-
-Finish with one short line highlighting the device’s key strength.
+Generate a clear, factual answer with bullet points and headings.
 """
-        else:
-            # 🌐 Normal factual style
-            full_prompt = f"""
-{style_instructions}
-
-You are a factual assistant.
-
-Below are web search excerpts:
-{search_results}
-
-Answer clearly and factually in paragraphs and bullet points only.
-No markdown tables, hashes (#), or '|' symbols.
-
-Question: {prompt}
-
-IMPORTANT: Keep the final answer under 2000 characters.
-"""
-
-        # === Step 5: Generate answer ===
-        response = safe_generate(gemini_model, full_prompt)
-        answer = getattr(response, "text", "Sorry, I couldn’t generate a response.")
-
-        # === Step 6: Clean formatting ===
-        answer = re.sub(r"\|.*\|", "", answer)
-        answer = re.sub(r"-{3,}", "", answer)
+        ai_resp = safe_generate(gemini_model, ai_prompt)
+        answer = getattr(ai_resp, "text", "Sorry, I couldn't generate a response.")
         answer = re.sub(r"\n\s*\n\s*\n+", "\n\n", answer.strip())
 
-        # Summarize if too long
-        if len(answer) > 3500:
-            summary_prompt = f"Summarize the following text in under 2000 characters:\n\n{answer}"
-            summary_resp = gemini_model.generate_content(summary_prompt)
-            answer = getattr(summary_resp, "text", answer)
-
     except Exception as e:
-        answer = f"Error: {str(e)}"
+        answer = f"⚠️ Error: {e}"
+        fallback_note = ""
 
-    formatted_answer = format_response(answer)
-    await progress_msg.edit_text(
-        formatted_answer,
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
+    final = format_response(fallback_note + answer)
+    await progress.edit_text(final, parse_mode="HTML", disable_web_page_preview=True)
 
 
 # --- New /ask: Gemini-only using HARD_CODED_PROMPT ---
@@ -1803,7 +1768,7 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         full_prompt = f"""{HARD_CODED_PROMPT}
 
 INSTRUCTIONS:
-- You are Dikshika (the assistant described above). Be polite, clear, and professional — but **do not** use emojis, hearts, sparkles, or decorative symbols.
+- You are Jarvis (the assistant described above). Be polite, clear, and professional — but **do not** use emojis, hearts, sparkles, or decorative symbols.
 - Prefer concise, helpful, and factually correct answers.
 - Use clean Markdown or HTML formatting (bold, lists, etc.) — but no decorative style.
 - If the answer has steps or items, use bullet points or numbered lists.
@@ -5938,6 +5903,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
