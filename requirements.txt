@@ -5,6 +5,7 @@ flask
 Flask-RESTful
 tgcrypto
 ffmpeg-python
+beautifulsoup4
 isodate
 pillow 
 psutil 
@@ -35,3 +36,4 @@ playwright==1.46.0
 # Timezones & templates
 pytz==2024.2 
 jinja2
+
