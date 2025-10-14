@@ -209,6 +209,28 @@ PACKS_FILE = "packs.json"
 #            "animated": {...}, "video": {...}}}
 user_packs = {}
 
+REGISTERED_USERS = set()
+REGISTERED_USERS_FILE = "registered_users.json"
+
+def load_registered_users():
+    global REGISTERED_USERS
+    try:
+        if os.path.exists(REGISTERED_USERS_FILE):
+            with open(REGISTERED_USERS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                REGISTERED_USERS = set(int(x) for x in data)
+    except Exception:
+        REGISTERED_USERS = set()
+
+def save_registered_users():
+    try:
+        with open(REGISTERED_USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(REGISTERED_USERS), f)
+    except Exception as e:
+        logger.exception("Failed to save registered users: %s", e)
+
+# Load at import/startup
+load_registered_users()
 
 # --- Moderators ---
 MODS = {8353079084}  # 🔹 Replace with your actual Telegram user IDs
@@ -1620,15 +1642,23 @@ Question: {prompt}
 Respond in plain text paragraphs and bullet points only — no markdown tables, no '###', no '---', no '|' symbols.
 """
 
+        # Tell Gemini to keep the output short
+        full_prompt += "\n\nIMPORTANT: Keep the final answer under 2000 characters. Be clear and concise."
+
         response = gemini_model.generate_content(full_prompt)
         answer = response.text if hasattr(response, "text") else "Sorry, I couldn’t generate a response."
 
-        # Optionally strip any stray markdown tables / pipes just in case
-        import re
-        answer = re.sub(r"\|.*\|", "", answer)  # remove table rows
-        answer = re.sub(r"#+\s*", "", answer)   # remove markdown headings
-        answer = re.sub(r"-{3,}", "", answer)   # remove horizontal rules
-        answer = re.sub(r"\n\s*\n\s*\n+", "\n\n", answer.strip())  # clean spacing
+        # Clean formatting
+        answer = re.sub(r"\|.*\|", "", answer)
+        answer = re.sub(r"-{3,}", "", answer)
+        answer = re.sub(r"\n\s*\n\s*\n+", "\n\n", answer.strip())
+
+        # If still too long, summarize
+        if len(answer) > 3500:
+            summary_prompt = f"Summarize the following text in under 2000 characters:\n\n{answer}"
+            summary_resp = gemini_model.generate_content(summary_prompt)
+            answer = summary_resp.text if hasattr(summary_resp, "text") else answer
+
 
     except Exception as e:
         answer = f"Error: {str(e)}"
@@ -2059,7 +2089,9 @@ def format_name(user):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command with deep-link support for find_ query and existing logic."""
     user = update.effective_user
-    REGISTERED_USERS.add(user.id)  # keep your existing registration behavior
+    REGISTERED_USERS.add(user.id)
+    save_registered_users()
+  # keep your existing registration behavior
     args = context.args
 
     # ---- Deep-link start=find_<query> (used when "Start me in DM" pressed) ----
@@ -5458,8 +5490,9 @@ async def restrict_stickers(client, message):
     user_id = message.from_user.id
 
     # If system is OFF → ignore
-    if not free_system_enabled.get(chat_id, True):
+    if not free_system_enabled.get(chat_id, False):
         return
+
 
     # ✅ Skip bots and admins
     if message.from_user.is_bot or await is_admin_pyro(client, chat_id, user_id):
@@ -5479,8 +5512,9 @@ async def restrict_stickers(client, message):
 @pyro_client.on_message(pyro_filters.sticker | pyro_filters.animation)
 async def block_unfree_media(client, message):
     # 🚫 If free system is OFF → allow everything
-    if not free_system_enabled.get(message.chat.id, True):
+    if not free_system_enabled.get(message.chat.id, False):
         return
+
 
     chat_id = message.chat.id
     user_id = message.from_user.id
@@ -5676,7 +5710,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
