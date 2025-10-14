@@ -1561,8 +1561,8 @@ async def is_member_admin(chat, user_id: int) -> bool:
 import time
 from datetime import datetime
 
-# --- Rename original behavior to /web ---
 async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Extract user prompt
     prompt = ' '.join(context.args) if context.args else (
         update.message.reply_to_message.text
         if update.message.reply_to_message and update.message.reply_to_message.text else ""
@@ -1575,16 +1575,21 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         progress_msg = await update.message.reply_text(
-            "<b><i>Fetching response...</i></b>",
+            "<i>Fetching response...</i>",
             parse_mode="HTML"
         )
 
-        # === Let model decide style ===
+        # === Style generation prompt ===
         style_prompt = f"""
-You are Dikshika ᥫ᭡, a polite and helpful assistant.
+You are Dikshika, a polite and professional AI assistant.
 
-When answering:
-
+Tone and style rules:
+- Never use emojis, decorative symbols, or hearts.
+- Write clean, factual, and well-structured detailed answers.
+- Use **plain text** with short paragraphs and bullet points (•).
+- Avoid markdown tables, pipes (|), hashes (#), or ASCII dividers.
+- Instead of tables, present information in simple list form.
+- Bold important technical terms using **double asterisks**.
 - If the user is asking for factual details (like phone specs, game tips, general info), 
   provide a clear, structured and detailed response.
 - Use ✘ headings and • bullet points where possible.
@@ -1598,22 +1603,32 @@ User question: "{prompt}"
         style_resp = gemini_model.generate_content(style_prompt)
         style_instructions = style_resp.text if hasattr(style_resp, "text") else ""
 
-        # factual grounding via Tavily (same as original)
+        # === Factual grounding using Tavily ===
         search_results = tavily_search(prompt)
 
+        # === Final response prompt ===
         full_prompt = f"""
-Based on the following search excerpts, answer the question:
+You are a factual assistant. Use these search excerpts to answer clearly:
 
 {search_results}
 
-Instructions:
+Follow these style rules:
 {style_instructions}
 
 Question: {prompt}
+
+Respond in plain text paragraphs and bullet points only — no markdown tables, no '###', no '---', no '|' symbols.
 """
 
         response = gemini_model.generate_content(full_prompt)
         answer = response.text if hasattr(response, "text") else "Sorry, I couldn’t generate a response."
+
+        # Optionally strip any stray markdown tables / pipes just in case
+        import re
+        answer = re.sub(r"\|.*\|", "", answer)  # remove table rows
+        answer = re.sub(r"#+\s*", "", answer)   # remove markdown headings
+        answer = re.sub(r"-{3,}", "", answer)   # remove horizontal rules
+        answer = re.sub(r"\n\s*\n\s*\n+", "\n\n", answer.strip())  # clean spacing
 
     except Exception as e:
         answer = f"Error: {str(e)}"
@@ -1624,6 +1639,7 @@ Question: {prompt}
         parse_mode="HTML",
         disable_web_page_preview=True
     )
+
 
 # --- New /ask: Gemini-only using HARD_CODED_PROMPT ---
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5660,6 +5676,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
