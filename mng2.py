@@ -117,6 +117,11 @@ def boldify(text: str) -> str:
     return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
 
 
+from functools import lru_cache
+
+@lru_cache(maxsize=200)
+def tavily_search_cached(query, max_results=3):
+    return tavily_search(query, max_results)
 
 
 
@@ -146,9 +151,58 @@ pyro_client = PyroClient(
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = Client(api_key=GROQ_API_KEY)
 
-GEMINI_KEY = os.getenv("GEMINI_KEY")
-genai.configure(api_key=GEMINI_KEY)
-gemini_model = genai.GenerativeModel("gemini-2.5-flash-preview-09-2025")
+import google.api_core.exceptions
+import time
+
+# === Gemini Key Rotation ===
+GEMINI_KEYS = [
+    os.getenv("GEMINI_KEY1"),
+    os.getenv("GEMINI_KEY2"),
+    os.getenv("GEMINI_KEY3"),
+    os.getenv("GEMINI_KEY4"),
+
+    # Add more keys if you have them
+]
+
+_current_gemini_index = 0
+
+def get_next_gemini_model():
+    """Rotate to the next Gemini API key and reconfigure."""
+    global _current_gemini_index
+    _current_gemini_index = (_current_gemini_index + 1) % len(GEMINI_KEYS)
+    new_key = GEMINI_KEYS[_current_gemini_index]
+    print(f"[Gemini] Switched to key #{_current_gemini_index + 1}")
+    genai.configure(api_key=new_key)
+    return genai.GenerativeModel("gemini-1.5-flash")
+
+
+def safe_generate(model, prompt, retries=3):
+    """Run Gemini with retries and automatic key rotation."""
+    for attempt in range(retries):
+        try:
+            return model.generate_content(prompt)
+        except google.api_core.exceptions.ResourceExhausted:
+            print("[Gemini] Quota exceeded — rotating key…")
+            model = get_next_gemini_model()
+            time.sleep(2)
+        except Exception as e:
+            print(f"[Gemini] Error: {e}")
+            if attempt < retries - 1:
+                time.sleep(2)
+            else:
+                raise
+    return None
+
+# Initialize first key
+gemini_model = get_next_gemini_model()
+
+try:
+    _ = safe_generate(gemini_model, "hi")
+    print("[Gemini] Model pre-warmed successfully.")
+except Exception:
+    pass
+
+
 
 
 
@@ -1621,15 +1675,24 @@ Tone and style rules:
 - For technical topics (like smartphones), give a **full specification sheet** 
   with fields such as Display, Performance, Camera, Battery, Other Features, Price, key features etc.
 - Always bold important terms (e.g., RAM, Battery, Chipset, Refresh Rate).
-- Keep tone polite, natural, and consistent.
+-Please answer within 1500 characters.
+
 
 User question: "{prompt}"
 """
-        style_resp = gemini_model.generate_content(style_prompt)
-        style_instructions = style_resp.text if hasattr(style_resp, "text") else ""
+        # Skip live style generation for speed
+        style_instructions = """
+        You are Dikshika, a polite and professional assistant.
+        - Use plain text with bullet points.
+        - Avoid emojis and decorative symbols.
+        - Bold key terms with **double asterisks**.
+        - Write short, factual, clear answers.
+        """
+
 
         # === Factual grounding using Tavily ===
-        search_results = tavily_search(prompt)
+        search_results = tavily_search_cached(prompt, max_results=2)
+
 
         # === Final response prompt ===
         full_prompt = f"""
@@ -1648,7 +1711,7 @@ Respond in plain text paragraphs and bullet points only — no markdown tables, 
         # Tell Gemini to keep the output short
         full_prompt += "\n\nIMPORTANT: Keep the final answer under 2000 characters. Be clear and concise."
 
-        response = gemini_model.generate_content(full_prompt)
+        response = safe_generate(gemini_model, full_prompt)
         answer = response.text if hasattr(response, "text") else "Sorry, I couldn’t generate a response."
 
         # Clean formatting
@@ -1715,7 +1778,7 @@ RESPONSE:
 """
 
         # Generate with Gemini (no tavily/google search)
-        response = gemini_model.generate_content(full_prompt)
+        response = safe_generate(gemini_model, full_prompt)
         answer = response.text if hasattr(response, "text") else "Sorry, I couldn't generate a response."
 
     except Exception as e:
@@ -5832,32 +5895,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
