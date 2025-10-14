@@ -2321,11 +2321,24 @@ async def find_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(results) == 1:
         await context.bot.send_photo(chat_id=chat_id, photo=results[0], caption=query)
     else:
-        media_group = [
-            PTBInputMediaPhoto(media=url, caption=query if i == 0 else None)
-            for i, url in enumerate(results)
-        ]
-        await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+        media_group = []
+        for i, url in enumerate(results):
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    bio = BytesIO(response.content)
+                    bio.name = f"image_{i}.jpg"
+                    media_group.append(
+                        PTBInputMediaPhoto(media=bio, caption=query if i == 0 else None)
+                    )
+            except Exception as e:
+                print(f"[WARN] Skipped invalid image URL: {url} ({e})")
+
+        if media_group:
+            await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+        else:
+            await update.message.reply_text("❌ No valid images found to send.")
+
 
 
 
@@ -5812,7 +5825,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
