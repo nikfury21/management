@@ -1558,25 +1558,25 @@ async def is_member_admin(chat, user_id: int) -> bool:
 import time
 from datetime import datetime
 
-async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- Rename original behavior to /web ---
+async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = ' '.join(context.args) if context.args else (
         update.message.reply_to_message.text
         if update.message.reply_to_message and update.message.reply_to_message.text else ""
     )
     if not prompt:
         await update.message.reply_text(
-            "Usage: /ask <your question> or reply to a message with /ask"
+            "Usage: /web <your question> or reply to a message with /web"
         )
         return
 
     try:
-        # Step 1: progress message
         progress_msg = await update.message.reply_text(
             "<b><i>Fetching response...</i></b>",
             parse_mode="HTML"
         )
 
-        # === Let model decide if chat or factual ===
+        # === Let model decide style ===
         style_prompt = f"""
 You are Dikshika ᥫ᭡, a polite and helpful assistant.
 
@@ -1592,14 +1592,12 @@ When answering:
 
 User question: "{prompt}"
 """
-        # The model generates style guidance + final tone rules
         style_resp = gemini_model.generate_content(style_prompt)
         style_instructions = style_resp.text if hasattr(style_resp, "text") else ""
 
-        # === Always try to search for factual grounding ===
+        # factual grounding via Tavily (same as original)
         search_results = tavily_search(prompt)
 
-        # Step 2: final full prompt
         full_prompt = f"""
 Based on the following search excerpts, answer the question:
 
@@ -1611,14 +1609,12 @@ Instructions:
 Question: {prompt}
 """
 
-        # Generate response
         response = gemini_model.generate_content(full_prompt)
         answer = response.text if hasattr(response, "text") else "Sorry, I couldn’t generate a response."
 
     except Exception as e:
         answer = f"Error: {str(e)}"
 
-    # Step 3: clean + send final response
     formatted_answer = format_response(answer)
     await progress_msg.edit_text(
         formatted_answer,
@@ -1626,6 +1622,57 @@ Question: {prompt}
         disable_web_page_preview=True
     )
 
+# --- New /ask: Gemini-only using HARD_CODED_PROMPT ---
+async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    prompt = ' '.join(context.args) if context.args else (
+        update.message.reply_to_message.text
+        if update.message.reply_to_message and update.message.reply_to_message.text else ""
+    )
+    if not prompt:
+        await update.message.reply_text(
+            "Usage: /ask <your question> or reply to a message with /ask"
+        )
+        return
+
+    try:
+        progress_msg = await update.message.reply_text(
+            "<b><i>Thinking...</i></b>",
+            parse_mode="HTML"
+        )
+
+        # Build simple prompt using HARD_CODED_PROMPT
+        full_prompt = f"""{HARD_CODED_PROMPT}
+
+        INSTRUCTIONS:
+        - You are Dikshika ᥫ᭡ (the assistant described above). Be creative, polite and helpful.
+        - Prefer short answers unless the user explicitly asks for long/exhaustive detail.
+        - Use clear structure: if the answer has steps or items, use bullet points or numbered lists.
+        - Highlight important terms by surrounding them with **double asterisks** (these will be converted to HTML <b> by the bot).
+        - If the user asks for technical specs, present a compact spec sheet with headings (Display, Performance, Camera, Battery, Other).
+        - If the user asks for code, return only the code block (with triple backticks and language) and a one-line explanation above it if needed.
+        - If you do not know the answer, say "I don't know" and suggest 1–2 practical next steps.
+        - Never invent factual sources; avoid hallucinated URLs or citations.
+        
+        USER QUERY:
+        {prompt}
+        
+        RESPONSE:
+        """
+
+
+        # Generate with Gemini only (no tavily/google search)
+        response = gemini_model.generate_content(full_prompt)
+        answer = response.text if hasattr(response, "text") else "Sorry, I couldn't generate a response."
+
+    except Exception as e:
+        answer = f"Error: {str(e)}"
+
+    formatted_answer = format_response(answer)
+    await progress_msg.edit_text(
+        formatted_answer,
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
 
 
 
@@ -5402,6 +5449,7 @@ async def start_bots():
         application.add_handler(CommandHandler("setfloodmode", setfloodmode))
         application.add_handler(CommandHandler("blacklistmode", set_blacklist_mode))
         application.add_handler(CommandHandler("ask", ask_command))
+        application.add_handler(CommandHandler("web", web_command))
         application.add_handler(CommandHandler("unfilter", unfilter))
         application.add_handler(CommandHandler("filter", add_filter_command))
         application.add_handler(CommandHandler("filters", list_filters_command))
@@ -5495,6 +5543,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
