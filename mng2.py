@@ -173,7 +173,7 @@ def get_next_gemini_model():
     new_key = GEMINI_KEYS[_current_gemini_index]
     print(f"[Gemini] Switched to key #{_current_gemini_index + 1}")
     genai.configure(api_key=new_key)
-    return genai.GenerativeModel("gemini-1.5-flash")
+    return genai.GenerativeModel("gemini-2.5-flash-preview-09-2025")
 
 
 def safe_generate(model, prompt, retries=3):
@@ -5895,6 +5895,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
