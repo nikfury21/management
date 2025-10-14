@@ -1558,61 +1558,25 @@ async def is_member_admin(chat, user_id: int) -> bool:
 import time
 from datetime import datetime
 
-# === Simple cache ===
-ASK_CACHE = {}
-CACHE_TTL = 300  # seconds (5 minutes)
-
-def get_cached_response(prompt: str):
-    entry = ASK_CACHE.get(prompt.lower())
-    if not entry:
-        return None
-    ts, data = entry
-    if time.time() - ts < CACHE_TTL:
-        return data
-    else:
-        del ASK_CACHE[prompt.lower()]
-        return None
-
-def save_to_cache(prompt: str, response: str):
-    ASK_CACHE[prompt.lower()] = (time.time(), response)
-
-def cleanup_cache():
-    now = time.time()
-    expired = [k for k, (ts, _) in ASK_CACHE.items() if now - ts > CACHE_TTL]
-    for k in expired:
-        del ASK_CACHE[k]
-
-
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = ' '.join(context.args) if context.args else (
         update.message.reply_to_message.text
         if update.message.reply_to_message and update.message.reply_to_message.text else ""
     )
     if not prompt:
-        await update.message.reply_text("Usage: /ask <your question> or reply to a message with /ask")
+        await update.message.reply_text(
+            "Usage: /ask <your question> or reply to a message with /ask"
+        )
         return
-
-    # ✅ Cache check
-    cached = get_cached_response(prompt)
-    if cached:
-        await update.message.reply_text(cached, parse_mode="HTML", disable_web_page_preview=True)
-        return
-
-    progress_msg = await update.message.reply_text("<b><i>Fetching response...</i></b>", parse_mode="HTML")
 
     try:
-        # === Step 1: Let Gemini classify chat vs search ===
-        classify_prompt = f"""
-Decide whether this user message requires a web search or not.
-Reply with only one word: "search" or "chat".
-Message: {prompt}
-"""
-        classify_resp = gemini_model.generate_content(classify_prompt)
-        intent = (classify_resp.text or "").strip().lower()
-        if intent not in ("chat", "search"):
-            intent = "search"  # fallback
+        # Step 1: progress message
+        progress_msg = await update.message.reply_text(
+            "<b><i>Fetching response...</i></b>",
+            parse_mode="HTML"
+        )
 
-        # === Step 2: Generate style guide (your Dikshika style) ===
+        # === Let model decide if chat or factual ===
         style_prompt = f"""
 You are Dikshika ᥫ᭡, a polite and helpful assistant.
 
@@ -1628,51 +1592,39 @@ When answering:
 
 User question: "{prompt}"
 """
+        # The model generates style guidance + final tone rules
         style_resp = gemini_model.generate_content(style_prompt)
         style_instructions = style_resp.text if hasattr(style_resp, "text") else ""
 
-        # === Step 3: Fetch web results only if needed ===
-        search_results = ""
-        if intent == "search":
-            try:
-                search_results = tavily_search(prompt)
-            except Exception as e:
-                search_results = f"(Web search failed: {e})"
+        # === Always try to search for factual grounding ===
+        search_results = tavily_search(prompt)
 
-        # === Step 4: Combine everything into final prompt ===
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Step 2: final full prompt
         full_prompt = f"""
-Current datetime: {now}
-
 Based on the following search excerpts, answer the question:
 
-{search_results if search_results else "No web results."}
+{search_results}
 
-Follow these instructions:
+Instructions:
 {style_instructions}
 
 Question: {prompt}
 """
 
+        # Generate response
         response = gemini_model.generate_content(full_prompt)
         answer = response.text if hasattr(response, "text") else "Sorry, I couldn’t generate a response."
-        formatted_answer = format_response(answer)
-
-        # ✅ Save + cleanup cache
-        save_to_cache(prompt, formatted_answer)
-        cleanup_cache()
 
     except Exception as e:
-        formatted_answer = f"⚠️ Error: {str(e)}"
+        answer = f"Error: {str(e)}"
 
-    # === Step 5: Send final message ===
+    # Step 3: clean + send final response
+    formatted_answer = format_response(answer)
     await progress_msg.edit_text(
         formatted_answer,
         parse_mode="HTML",
         disable_web_page_preview=True
     )
-
-
 
 
 
@@ -5543,6 +5495,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
