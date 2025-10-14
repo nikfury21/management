@@ -2040,24 +2040,34 @@ def format_name(user):
     return name or "Unknown"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Existing start behavior + deep-link support for find_ query."""
+    """Start command with deep-link support for find_ query and existing logic."""
     user = update.effective_user
     REGISTERED_USERS.add(user.id)  # keep your existing registration behavior
     args = context.args
 
-    # ---- New: handle deep-link start=find_<query> to auto-run /find ----
+    # ---- Deep-link start=find_<query> (used when "Start me in DM" pressed) ----
     if args and args[0].startswith("find_"):
-        # reconstruct query: /start find_my_search_terms_here
         q = args[0].replace("find_", "").replace("_", " ").strip()
-        # emulate context.args for find_command: use [query] so find_command sees it in private
-        # Ensure we set context.args to the query only for the call
-        previous_args = context.args
-        try:
-            context.args = [q]
-            # If this start is in a private chat, call find_command directly
-            await find_command(update, context)
-        finally:
-            context.args = previous_args
+
+        # If this is a private chat, run find_command directly
+        if update.effective_chat.type == "private":
+            previous_args = context.args
+            try:
+                context.args = [q]
+                await find_command(update, context)
+            finally:
+                context.args = previous_args
+        else:
+            # In a group → just send the DM link again (don’t auto-run)
+            bot_username = (await context.bot.get_me()).username
+            deep_link = f"https://t.me/{bot_username}?start=find_{q.replace(' ', '_')}"
+            keyboard = InlineKeyboardMarkup(
+                [[InlineKeyboardButton("👉 Start me in DM", url=deep_link)]]
+            )
+            await update.message.reply_text(
+                "⚠️ I can only send images in DM.\nTap below to start me there.",
+                reply_markup=keyboard,
+            )
         return
 
     # === Captcha deep-link (existing logic) ===
@@ -2076,15 +2086,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             f"Solve to unmute:\n<b>{q} = ?</b>\n\nYou have 3 tries.",
             parse_mode=ParseMode.HTML,
-            reply_markup=kb
+            reply_markup=kb,
         )
 
     # === Kang registration logic (existing) ===
     if args and args[0] == "kang":
-        await update.message.reply_text("✅ You’re registered! Now go back and use /kang again.")
+        await update.message.reply_text(
+            "✅ You’re registered! Now go back and use /kang again."
+        )
         return
 
-    # === Existing: auto-send help in PM or message in groups ===
+    # === Default start behavior ===
     if update.effective_chat.type == "private":
         await help_command(update, context)
     else:
@@ -2092,7 +2104,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👋 Hi! I’m your group management bot.\n\n"
             "Add me in your group as admin and enjoy the wholesome sets of useful codes."
         )
-
 
 
 
@@ -5648,6 +5659,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
