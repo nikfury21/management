@@ -3643,67 +3643,30 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
     # === AFK Logic ===
+    # === AFK Logic ===
     if sender_id in afk_users:
-        afk_data = afk_users.pop(sender_id)
-        duration = datetime.utcnow() - afk_data["time"]
-        hours, remainder = divmod(int(duration.total_seconds()), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        duration_parts = []
-        if hours:
-            duration_parts.append(f"{hours}h")
-        if minutes:
-            duration_parts.append(f"{minutes}m")
-        if seconds:
-            duration_parts.append(f"{seconds}s")
-        duration_str = " ".join(duration_parts) or "moments"
-        user_chat = await context.bot.get_chat(sender_id)
-        display_name = get_full_name(user_chat)
-        text = f"[{display_name}](tg://user?id={sender_id}) Is now back online and they were afk for {duration_str}."
+        afk_data = afk_users[sender_id]
+        current_chat = message.chat.id
 
-        if afk_data.get("reason") and afk_data["reason"] != "None":
-            text += f"\nReason: {afk_data['reason']}"
-        try:
-            if afk_data.get("media"):
-                if afk_data.get("media_type") == "photo":
-                    await message.reply_photo(afk_data["media"], caption=text, parse_mode="HTML")
-                elif afk_data.get("media_type") == "sticker":
-                    file = await context.bot.get_file(afk_data["media"])
-                    sticker_bytes = await file.download_as_bytearray()
-                    image_obj = Image.open(BytesIO(sticker_bytes)).convert("RGBA")
-                    bg = Image.new("RGBA", image_obj.size, (0, 0, 0, 255))
-                    bg.paste(image_obj, (0, 0), image_obj)
-                    bio = BytesIO()
-                    bio.name = "sticker.png"
-                    bg.save(bio, "PNG")
-                    bio.seek(0)
-                    await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode="Markdown")
-                else:
-                    await message.reply_text(text, parse_mode="Markdown")
+        # If afk_data has 'chats', end AFK only if the user posts in one of those chats
+        should_end_afk = False
+        if "chats" in afk_data:
+            if current_chat in afk_data["chats"]:
+                should_end_afk = True
             else:
-                await message.reply_text(text, parse_mode="Markdown")
-        except Exception:
-            await message.reply_text(text, parse_mode="Markdown")
+                should_end_afk = False
+        else:
+            # backward compatibility: if older entries have no 'chats', end AFK
+            should_end_afk = True
 
-    mentioned_ids = set()
-    if message.entities:
-        for ent in message.entities:
-            if ent.type == "text_mention" and ent.user:
-                mentioned_ids.add(ent.user.id)
-            elif ent.type == "mention":
-                username = message.text[ent.offset: ent.offset + ent.length]
-                for afk_id in afk_users.keys():
-                    user = await context.bot.get_chat(afk_id)
-                    if user.username and username.lower() == f"@{user.username.lower()}":
-                        mentioned_ids.add(afk_id)
+        if should_end_afk:
+            # remove AFK now
+            afk_data = afk_users.pop(sender_id, None)
+        else:
+            # do not end AFK for other chats; skip the "back" message
+            afk_data = None
 
-    if message.reply_to_message:
-        replied_user = message.reply_to_message.from_user
-        if replied_user and replied_user.id in afk_users:
-            mentioned_ids.add(replied_user.id)
-
-    for uid in mentioned_ids:
-        if uid in afk_users:
-            afk_data = afk_users[uid]
+        if afk_data:
             duration = datetime.utcnow() - afk_data["time"]
             hours, remainder = divmod(int(duration.total_seconds()), 3600)
             minutes, seconds = divmod(remainder, 60)
@@ -3715,9 +3678,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if seconds:
                 duration_parts.append(f"{seconds}s")
             duration_str = " ".join(duration_parts) or "moments"
-            user_chat = await context.bot.get_chat(uid)
+            user_chat = await context.bot.get_chat(sender_id)
             display_name = get_full_name(user_chat)
-            text = f"[{display_name}](tg://user?id={uid}) is AFK since {duration_str}."
+            text = f"[{display_name}](tg://user?id={sender_id}) Is now back online and they were afk for {duration_str}."
 
             if afk_data.get("reason") and afk_data["reason"] != "None":
                 text += f"\nReason: {afk_data['reason']}"
@@ -3742,6 +3705,127 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await message.reply_text(text, parse_mode="Markdown")
             except Exception:
                 await message.reply_text(text, parse_mode="Markdown")
+
+
+    # --- Mentions / AFK reply (per-chat) ---
+    mentioned_ids = set()
+    current_chat = message.chat.id
+
+    # Collect mentions but only where the AFK was set (if per-chat)
+    if message.entities:
+        for ent in message.entities:
+            # direct text-mention (user object)
+            if ent.type == "text_mention" and ent.user:
+                uid = ent.user.id
+                afk_entry = afk_users.get(uid)
+                if uid in afk_users:
+                    # if entry is dict with per-chat list, check membership
+                    if isinstance(afk_entry, dict) and afk_entry.get("chats"):
+                        if current_chat in afk_entry.get("chats", []):
+                            mentioned_ids.add(uid)
+                    else:
+                        # backward-compat: no 'chats' -> treat as global AFK
+                        mentioned_ids.add(uid)
+
+            # @username mention — map username -> afk user and apply same chat check
+            elif ent.type == "mention":
+                username = message.text[ent.offset: ent.offset + ent.length]
+                for afk_id in list(afk_users.keys()):
+                    try:
+                        user = await context.bot.get_chat(afk_id)
+                    except Exception:
+                        continue
+                    if user and user.username and username.lower() == f"@{user.username.lower()}":
+                        afk_entry = afk_users.get(afk_id)
+                        if isinstance(afk_entry, dict) and afk_entry.get("chats"):
+                            if current_chat in afk_entry.get("chats", []):
+                                mentioned_ids.add(afk_id)
+                        else:
+                            mentioned_ids.add(afk_id)
+
+    # If replying to an AFK user's message, only count it if AFK applies in this chat
+    if message.reply_to_message:
+        replied_user = message.reply_to_message.from_user
+        if replied_user and replied_user.id in afk_users:
+            afk_entry = afk_users.get(replied_user.id)
+            if isinstance(afk_entry, dict) and afk_entry.get("chats"):
+                if current_chat in afk_entry.get("chats", []):
+                    mentioned_ids.add(replied_user.id)
+            else:
+                mentioned_ids.add(replied_user.id)
+
+    # Now respond for each mentioned AFK user (only those allowed above)
+    for uid in mentioned_ids:
+        afk_data = afk_users.get(uid)
+        if not afk_data:
+            continue
+
+        # determine start time robustly (datetime or numeric timestamp)
+        start_time = None
+        if isinstance(afk_data, dict) and "time" in afk_data:
+            start_time = afk_data["time"]
+        elif isinstance(afk_data, (int, float)):
+            start_time = datetime.utcfromtimestamp(int(afk_data))
+        elif hasattr(afk_data, "get") and afk_data.get("time"):
+            start_time = afk_data.get("time")
+
+        if not start_time:
+            continue
+
+        if isinstance(start_time, (int, float)):
+            duration = datetime.utcnow() - datetime.utcfromtimestamp(int(start_time))
+        else:
+            # assume datetime
+            duration = datetime.utcnow() - start_time
+
+        hours, remainder = divmod(int(duration.total_seconds()), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        duration_parts = []
+        if hours:
+            duration_parts.append(f"{hours}h")
+        if minutes:
+            duration_parts.append(f"{minutes}m")
+        if seconds:
+            duration_parts.append(f"{seconds}s")
+        duration_str = " ".join(duration_parts) or "moments"
+
+        try:
+            user_chat = await context.bot.get_chat(uid)
+            display_name = get_full_name(user_chat)
+        except Exception:
+            display_name = "User"
+
+        text = f"[{display_name}](tg://user?id={uid}) is AFK since {duration_str}."
+
+        if isinstance(afk_data, dict) and afk_data.get("reason") and afk_data["reason"] != "None":
+            text += f"\nReason: {afk_data['reason']}"
+
+        try:
+            if isinstance(afk_data, dict) and afk_data.get("media"):
+                if afk_data.get("media_type") == "photo":
+                    await message.reply_photo(afk_data["media"], caption=text, parse_mode="HTML")
+                elif afk_data.get("media_type") == "sticker":
+                    file = await context.bot.get_file(afk_data["media"])
+                    sticker_bytes = await file.download_as_bytearray()
+                    image_obj = Image.open(BytesIO(sticker_bytes)).convert("RGBA")
+                    bg = Image.new("RGBA", image_obj.size, (0, 0, 0, 255))
+                    bg.paste(image_obj, (0, 0), image_obj)
+                    bio = BytesIO()
+                    bio.name = "sticker.png"
+                    bg.save(bio, "PNG")
+                    bio.seek(0)
+                    await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode="Markdown")
+                else:
+                    await message.reply_text(text, parse_mode="Markdown")
+            else:
+                await message.reply_text(text, parse_mode="Markdown")
+        except Exception:
+            # best-effort fallback
+            try:
+                await message.reply_text(text, parse_mode="Markdown")
+            except Exception:
+                pass
+
 
     # ---- NIGHTMODE ENFORCEMENT ----
     ist = pytz.timezone("Asia/Kolkata")
@@ -4490,12 +4574,26 @@ async def afk_command(update, context):
             afk_media = reply.sticker.file_id
             afk_media_type = "sticker"
 
+    # store AFK with per-chat info so AFK only ends when user returns in that same chat
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    existing = afk_users.get(user.id)
+
+    # Merge if AFK already active elsewhere
+    if existing:
+        chats = existing.get("chats", set())
+        chats.add(chat_id)
+    else:
+        chats = {chat_id} if chat_id is not None else set()
+
     afk_users[user.id] = {
         "time": datetime.utcnow(),
         "reason": reason,
         "media": afk_media,
         "media_type": afk_media_type,
+        "chats": chats,
     }
+
+
 
     text = f"[{user.first_name}](tg://user?id={user.id}) Is now away from keyboard! Sayonara!"
     if reason and reason != "None":
