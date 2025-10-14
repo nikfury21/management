@@ -2321,13 +2321,19 @@ async def find_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(results) == 1:
         await context.bot.send_photo(chat_id=chat_id, photo=results[0], caption=query)
     else:
+        from PIL import Image
+
         media_group = []
         for i, url in enumerate(results):
             try:
                 response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    bio = BytesIO(response.content)
+                if response.status_code == 200 and response.content:
+                    # Convert to proper JPEG to avoid "image_process_failed"
+                    img = Image.open(BytesIO(response.content)).convert("RGB")
+                    bio = BytesIO()
+                    img.save(bio, format="JPEG")
                     bio.name = f"image_{i}.jpg"
+                    bio.seek(0)
                     media_group.append(
                         PTBInputMediaPhoto(media=bio, caption=query if i == 0 else None)
                     )
@@ -2338,6 +2344,7 @@ async def find_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_media_group(chat_id=chat_id, media=media_group)
         else:
             await update.message.reply_text("❌ No valid images found to send.")
+
 
 
 
