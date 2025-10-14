@@ -1751,9 +1751,9 @@ from datetime import datetime
 
 async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Web-only structured responder WITHOUT Gemini.
-    Intent-detection (device | engine | other) is done deterministically
-    from the web snippets + user query. Sections are chosen based on intent.
+    Structured web-only specs fetcher (no Gemini).
+    Automatically classifies between device/engine/general queries
+    and organizes data into correct, clean sections.
     """
     prompt = ' '.join(context.args) if context.args else (
         update.message.reply_to_message.text
@@ -1763,10 +1763,10 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /web <your question> or reply to a message with /web")
         return
 
-    progress = await update.message.reply_text("<i>Fetching response...</i>", parse_mode="HTML")
+    progress = await update.message.reply_text("<i>Fetching structured info...</i>", parse_mode="HTML")
 
     try:
-        # 1) fetch web snippets via your Tavily cached function
+        # Fetch web snippets
         try:
             search_results = tavily_search_cached(prompt, max_results=6) or ""
         except Exception as e:
@@ -1775,182 +1775,95 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not search_results.strip():
             await progress.edit_text(
-                format_response(f"❗ No live web snippets found for: \"{prompt}\". Try a different query."),
+                format_response(f"❗ No live web snippets found for: \"{prompt}\""),
                 parse_mode="HTML",
                 disable_web_page_preview=True
             )
             return
 
-        # Normalize snippet text for matching
-        snippet_text = search_results.lower()
+        # Normalize snippet text
+        text = re.sub(r"\s+", " ", search_results.strip())
+        lines = re.split(r"(?<=[.!?])\s+", text)
+        clean_lines = [l.strip() for l in lines if 20 < len(l) < 250]
 
-        # 2) Intent detection (deterministic rules)
-        device_keywords = [
-            r"\bm(?:obile|phone|smartphone|iphone|galaxy|pixel|vivo|oppo|oneplus|huawei|xiaomi|redmi|moto)\b",
-            r"\b(macbook|laptop|notebook|ultrabook|thinkpad|dell|xps|zenbook)\b",
-            r"\b(display|screen|inch|resolution|amoled|oled|lcd|ppi|camera|mAh|snapdragon|mediatek|processor|cpu|ram|storage|gb ram)\b"
+        # Intent detection (device vs engine)
+        low_text = text.lower()
+        is_device = any(k in low_text for k in [
+            "display", "screen", "inch", "smartphone", "camera", "battery", "ram", "storage", "processor", "snapdragon"
+        ])
+        is_engine = any(k in low_text for k in [
+            "engine", "horsepower", "hp", "torque", "displacement", "cc", "diesel", "petrol"
+        ])
+
+        # Helper to match lines to sections
+        def match_section(sentence):
+            s = sentence.lower()
+            if any(k in s for k in ["display", "screen", "inch", "resolution", "refresh", "amoled", "oled"]):
+                return "Display"
+            if any(k in s for k in ["processor", "chip", "cpu", "ghz", "performance", "gpu", "mediatek", "snapdragon", "m1", "m2"]):
+                return "Performance"
+            if any(k in s for k in ["camera", "megapixel", "mp", "lens", "selfie", "rear camera", "front camera"]):
+                return "Camera"
+            if any(k in s for k in ["battery", "mah", "charging", "fast charge", "watt", "power", "endurance"]):
+                return "Battery"
+            if any(k in s for k in ["ram", "storage", "rom", "memory", "ufs", "lpddr", "expandable"]):
+                return "Memory & Storage"
+            if any(k in s for k in ["wifi", "bluetooth", "5g", "4g", "nfc", "usb", "port", "jack"]):
+                return "Connectivity"
+            if any(k in s for k in ["android", "ios", "windows", "macos", "os", "software", "ui", "version"]):
+                return "Software & OS"
+            if any(k in s for k in ["sensor", "fingerprint", "gyro", "accelerometer", "compass", "headphone"]):
+                return "Sensors & Ports"
+            if any(k in s for k in ["dimension", "mm", "weight", "height", "thickness", "size"]):
+                return "Dimensions & Weight"
+            if any(k in s for k in ["release", "launch", "announced", "available"]):
+                return "Release Date"
+            if any(k in s for k in ["price", "variant", "version", "model"]):
+                return "Variants"
+            if any(k in s for k in ["review", "score", "summary", "overall", "features", "highlight"]):
+                return "Notes"
+
+            # Engine-specific
+            if any(k in s for k in ["engine", "motor", "hp", "horsepower", "torque", "cc", "displacement", "fuel", "diesel", "petrol", "kw"]):
+                return "Engine"
+
+            return None
+
+        # Assign lines to buckets
+        grouped = {}
+        for line in clean_lines:
+            sec = match_section(line)
+            if sec:
+                grouped.setdefault(sec, [])
+                if line not in grouped[sec] and len(grouped[sec]) < 5:
+                    grouped[sec].append(line)
+
+        # Order of sections
+        order = [
+            "Display", "Performance", "Camera", "Battery", "Memory & Storage", "Connectivity",
+            "Software & OS", "Sensors & Ports", "Dimensions & Weight", "Release Date", "Variants", "Notes", "Engine"
         ]
-        engine_keywords = [
-            r"\bengine\b", r"\bmotor\b", r"\bhp\b", r"\bhorsepower\b", r"\bkw\b",
-            r"\btorque\b", r"\bdisplacement\b", r"\bcc\b", r"\bfuel\b", r"\bdiesel\b", r"\bpetrol\b"
-        ]
 
-        is_device = any(re.search(rx, snippet_text) for rx in device_keywords) or bool(re.search(r"\b(specs|specifications|battery|camera|ram|storage)\b", prompt, flags=re.I))
-        is_engine = any(re.search(rx, snippet_text) for rx in engine_keywords) or bool(re.search(r"\b(engine|motor|hp|horsepower|torque|displacement|cc)\b", prompt, flags=re.I))
+        # Build output
+        output = [f"📌 <b>Query:</b> {prompt}\n"]
+        for sec in order:
+            if sec in grouped:
+                output.append(f"<b>{sec}:</b>")
+                for l in grouped[sec]:
+                    output.append(f"• {l}")
+                output.append("")
 
-        # If both detected, prioritize the one with stronger evidence (count matches)
-        if is_device and is_engine:
-            dev_hits = sum(bool(re.search(rx, snippet_text)) for rx in device_keywords)
-            eng_hits = sum(bool(re.search(rx, snippet_text)) for rx in engine_keywords)
-            if eng_hits > dev_hits:
-                is_device = False
-            else:
-                is_engine = False
+        # Add Sources
+        sources = re.findall(r"(?:https?://)?(?:www\.)?([a-z0-9\-]+\.(?:com|net|org|in|co))", search_results, flags=re.I)
+        sources = list(dict.fromkeys(sources))[:6]
+        if sources:
+            output.append("<b>Sources:</b> " + ", ".join(sources))
 
-        # 3) sentence split helper
-        def split_sentences(text: str):
-            parts = re.split(r'(?<=[\.\?\!]\s)|\n', text)
-            out = []
-            for p in parts:
-                s = p.strip()
-                if s:
-                    out.append(re.sub(r'\s+', ' ', s))
-            return out
-
-        sentences = split_sentences(search_results)
-
-        # 4) small utility to gather relevant lines for keywords/regexes
-        def collect_matches(keywords=None, regexes=None, max_items=6):
-            found, seen = [], set()
-            kws = [k.lower() for k in (keywords or [])]
-            for s in sentences:
-                s_low = s.lower()
-                matched = False
-                if regexes:
-                    for rx in regexes:
-                        if re.search(rx, s, flags=re.I):
-                            if s not in seen:
-                                found.append(s)
-                                seen.add(s)
-                                matched = True
-                                break
-                if matched:
-                    if len(found) >= max_items:
-                        break
-                    continue
-                for k in kws:
-                    if k in s_low:
-                        if s not in seen:
-                            found.append(s)
-                            seen.add(s)
-                            break
-                if len(found) >= max_items:
-                    break
-            return found[:max_items]
-
-        # 5) Build output by intent
-        parts = []
-        parts.append(f"📌 <b>Query:</b> {prompt}")
-        parts.append("")
-
-        if is_device:
-            # Device-specific sections
-            sections = {
-                "Display": (["display", "screen", "inch", "resolution", "oled", "amoled", "ppi"], [r"\b\d+(\.\d+)?\s*inch\b", r"\b\d{3,4}x\d{3,4}\b"]),
-                "Performance": (["processor", "cpu", "chip", "snapdragon", "mediatek", "apple m", "m1", "m2", "ghz", "octa-core"], [r"\b\d+(\.\d+)?\s*ghz\b"]),
-                "Camera": (["camera", "megapixel", "mp", "ultra-wide", "telephoto"], [r"\b\d{1,3}\s*mp\b"]),
-                "Battery": (["battery", "mah", "fast charging", "wireless charging"], [r"\b\d{3,5}\s*mAh\b", r"\b\d+W\b"]),
-                "Memory & Storage": (["ram", "storage", "gb"], [r"\b\d+\s*gb\b"]),
-                "Connectivity": (["5g", "4g", "wifi", "bluetooth", "nfc", "usb-c"], []),
-                "Software & OS": (["android", "ios", "macos", "windows", "one ui", "miui", "oxygenos"], []),
-                "Sensors & Ports": (["fingerprint", "gyro", "accelerometer", "headphone"], []),
-                "Dimensions & Weight": (["weight", "mm", "thickness", "dimensions"], [r"\b\d+(\.\d+)?\s*mm\b", r"\b\d+(\.\d+)?\s*g\b"]),
-                "Release Date": (["released", "announced", "launch"], [r"\b(19|20)\d{2}\b"])
-            }
-            for sec, (kws, rxs) in sections.items():
-                matches = collect_matches(keywords=kws, regexes=rxs, max_items=6)
-                if matches:
-                    bullets = []
-                    for m in matches:
-                        m_clean = m.strip()
-                        if len(m_clean) > 200:
-                            m_clean = m_clean[:197].rsplit(" ",1)[0] + "..."
-                        bullets.append(f"• {m_clean}")
-                    parts.append(f"<b>{sec}:</b>")
-                    parts.append("\n".join(bullets))
-                    parts.append("")
-                else:
-                    # omit sections with no matches entirely (so we DON'T show irrelevant sections)
-                    pass
-
-            # Notes: gather general review/price/summary lines
-            notes = collect_matches(keywords=["price", "review", "score", "benchmark", "thermals", "best"], max_items=4)
-            if notes:
-                parts.append("<b>Notes:</b>")
-                parts.extend([f"• {n.strip()}" for n in notes])
-                parts.append("")
-
-        elif is_engine:
-            # Engine-specific sections
-            sections = {
-                "Power / Output": (["hp", "horsepower", "kW", "power", "output"], [r"\b\d{1,4}\s*(?:hp|kw)\b"]),
-                "Displacement": (["displacement", "cc", "litre", "liter"], [r"\b\d{1,4}\s*cc\b", r"\b\d+(\.\d+)?\s*L\b"]),
-                "Torque": (["torque", "Nm", "lb-ft", "lbft"], [r"\b\d{1,4}\s*(?:nm|lb-?ft|lbft)\b"]),
-                "Fuel / Type": (["diesel", "petrol", "gasoline", "hybrid", "electric"], []),
-                "Cooling / Layout": (["cooling", "water-cooled", "air-cooled", "v-type", "inline"], []),
-                "Applications": (["tractor", "car", "motorcycle", "generator", "marine"], [])
-            }
-            for sec, (kws, rxs) in sections.items():
-                matches = collect_matches(keywords=kws, regexes=rxs, max_items=6)
-                if matches:
-                    parts.append(f"<b>{sec}:</b>")
-                    parts.extend([f"• {m.strip()}" for m in matches])
-                    parts.append("")
-            notes = collect_matches(keywords=["maintenance", "service interval", "fuel consumption", "efficiency"], max_items=4)
-            if notes:
-                parts.append("<b>Notes:</b>")
-                parts.extend([f"• {n.strip()}" for n in notes])
-                parts.append("")
-
-        else:
-            # Generic structured answer for other queries
-            # Title / one-sentence summary / key facts
-            title = sentences[0] if sentences else ""
-            summary = sentences[1] if len(sentences) > 1 else ""
-            key_facts = collect_matches(keywords=[w for w in re.split(r"\s+", prompt) if len(w) > 3], max_items=6)
-
-            if title:
-                parts.append(f"<b>Title / Headline:</b>\n• {title.strip()}\n")
-            if summary:
-                parts.append(f"<b>Summary:</b>\n• {summary.strip()}\n")
-            if key_facts:
-                parts.append("<b>Key facts:</b>")
-                parts.extend([f"• {k.strip()}" for k in key_facts])
-                parts.append("")
-
-        # 6) Sources: extract domains from snippets
-        domains = re.findall(r"(?:https?://)?(?:www\.)?([a-z0-9\-]+\.(?:com|net|org|io|co|in|me|info))", search_results, flags=re.I)
-        sources = []
-        for d in domains:
-            dn = d.lower()
-            if dn not in sources:
-                sources.append(dn)
-            if len(sources) >= 6:
-                break
-        if not sources:
-            sources = ["web"]
-
-        parts.append("<b>Sources:</b> " + ", ".join(sources[:6]))
-
-        final_text = "\n".join(parts)
-
-        await progress.edit_text(format_response(final_text[:4000]), parse_mode="HTML", disable_web_page_preview=True)
-        return
+        result_text = "\n".join(output)
+        await progress.edit_text(format_response(result_text[:4000]), parse_mode="HTML", disable_web_page_preview=True)
 
     except Exception as e:
-        print("[web_command] unexpected error:", e)
-        await progress.edit_text(format_response(f"⚠️ Error generating web response: {e}"), parse_mode="HTML", disable_web_page_preview=True)
-        return
+        await progress.edit_text(format_response(f"⚠️ Error: {e}"), parse_mode="HTML", disable_web_page_preview=True)
 
 
 # --- New /ask: Gemini-only using HARD_CODED_PROMPT ---
@@ -6257,6 +6170,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
