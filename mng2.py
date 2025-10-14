@@ -1658,73 +1658,116 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-        # === Style generation prompt ===
-        style_prompt = f"""
+        # === Step 1: Intent classification (AI-based, no hardcoded words) ===
+        classify_prompt = f"""
+Determine whether the user is asking for **technical specifications of a mobile, laptop, tablet, or PC**.
+Respond with just one word:
+- "device" → if it's clearly about a gadget's specifications
+- "other" → otherwise
+
+User query: "{prompt}"
+"""
+        try:
+            classify_resp = safe_generate(gemini_model, classify_prompt)
+            classify_text = getattr(classify_resp, "text", "").strip().lower()
+        except Exception:
+            classify_text = "other"
+
+        is_device_query = "device" in classify_text
+
+        # === Step 2: Get factual grounding ===
+        search_results = tavily_search_cached(prompt, max_results=2)
+
+        # === Step 3: Style rules (consistent with other commands) ===
+        style_instructions = """
 You are Dikshika, a polite and professional AI assistant.
 
 Tone and style rules:
-- Never use emojis, decorative symbols, or hearts.
-- Write clean, factual, and well-structured detailed answers.
+- Never use emojis or decorative symbols.
 - Use **plain text** with short paragraphs and bullet points (•).
-- Avoid markdown tables, pipes (|), hashes (#), or ASCII dividers.
-- Instead of tables, present information in simple list form.
-- Bold important technical terms using **double asterisks**.
-- If the user is asking for factual details (like phone specs, game tips, general info), 
-  provide a clear, structured and detailed response.
-- Use ✘ headings and • bullet points where possible.
-- For technical topics (like smartphones), give a **full specification sheet** 
-  with fields such as Display, Performance, Camera, Battery, Other Features, Price, key features etc.
-- Always bold important terms (e.g., RAM, Battery, Chipset, Refresh Rate).
--Please answer within 1500 characters.
-
-
-User question: "{prompt}"
+- Bold key terms with **double asterisks**.
+- Avoid markdown tables, pipes (|), or ASCII dividers.
+- Present info as simple lists with clear headings (✘ or section titles).
+- Always stay factual, concise, and under 1500–2000 characters.
 """
-        # Skip live style generation for speed
-        style_instructions = """
-        You are Dikshika, a polite and professional assistant.
-        - Use plain text with bullet points.
-        - Avoid emojis and decorative symbols.
-        - Bold key terms with **double asterisks**.
-        - Write short, factual, clear answers.
-        """
 
+        # === Step 4: Build main prompt based on detected type ===
+        if is_device_query:
+            # 📱 Gadget specification format
+            full_prompt = f"""
+{style_instructions}
 
-        # === Factual grounding using Tavily ===
-        search_results = tavily_search_cached(prompt, max_results=2)
+You are a knowledgeable tech assistant.
 
+The user asked about: "{prompt}"
 
-        # === Final response prompt ===
-        full_prompt = f"""
-You are a factual assistant. Use these search excerpts to answer clearly:
-
+Here are factual search snippets:
 {search_results}
 
-Follow these style rules:
+Write a **complete, clean specification sheet** like GSMArena or NotebookCheck.
+Use this layout exactly (no extra emojis or symbols):
+
+✘ Manufacturer : <brand>
+⦁ Release Date : <month year>
+
+✘ Display
+⦁ <size, type, resolution, refresh rate>
+
+✘ Processor & Performance
+⦁ <chipset, cores, GPU, RAM, storage>
+
+✘ Camera Setup
+⦁ <rear + front cameras, video>
+
+★ Battery & Charging
+⦁ <capacity, fast charging>
+
+✘ Build & Features
+⦁ <dimensions, weight, material, fingerprint, ports, etc.>
+
+✘ Connectivity
+⦁ <Wi-Fi, Bluetooth, GPS, 5G, NFC, etc.>
+
+✘ OS & Interface
+⦁ <Android/iOS/Windows/macOS version>
+
+✘ Sensors
+⦁ <sensor list>
+
+Finish with one short line highlighting the device’s key strength.
+"""
+        else:
+            # 🌐 Normal factual style
+            full_prompt = f"""
 {style_instructions}
+
+You are a factual assistant.
+
+Below are web search excerpts:
+{search_results}
+
+Answer clearly and factually in paragraphs and bullet points only.
+No markdown tables, hashes (#), or '|' symbols.
 
 Question: {prompt}
 
-Respond in plain text paragraphs and bullet points only — no markdown tables, no '###', no '---', no '|' symbols.
+IMPORTANT: Keep the final answer under 2000 characters.
 """
 
-        # Tell Gemini to keep the output short
-        full_prompt += "\n\nIMPORTANT: Keep the final answer under 2000 characters. Be clear and concise."
-
+        # === Step 5: Generate answer ===
         response = safe_generate(gemini_model, full_prompt)
-        answer = response.text if hasattr(response, "text") else "Sorry, I couldn’t generate a response."
+        answer = getattr(response, "text", "Sorry, I couldn’t generate a response.")
 
-        # Clean formatting
+        # === Step 6: Clean formatting ===
         answer = re.sub(r"\|.*\|", "", answer)
         answer = re.sub(r"-{3,}", "", answer)
         answer = re.sub(r"\n\s*\n\s*\n+", "\n\n", answer.strip())
 
-        # If still too long, summarize
+        # Summarize if too long
         if len(answer) > 3500:
             summary_prompt = f"Summarize the following text in under 2000 characters:\n\n{answer}"
             summary_resp = gemini_model.generate_content(summary_prompt)
-            answer = summary_resp.text if hasattr(summary_resp, "text") else answer
-
+            answer = getattr(summary_resp, "text", answer)
 
     except Exception as e:
         answer = f"Error: {str(e)}"
@@ -5895,6 +5938,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
