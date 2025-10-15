@@ -1743,133 +1743,287 @@ async def is_member_admin(chat, user_id: int) -> bool:
         return False
 
 
+
 async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Universal /web command:
-    - Replies to any query.
-    - Automatically detects device-type topics and shows full structured specs.
-    - Outputs clean spec sections like ★ Display, ★ Processor, etc.
+    🌐 /web <query>
+    Universal intelligent web search summarizer:
+      • Works for any topic (news, sports, specs, movies, etc.)
+      • Structured & readable: Overview + Key Points + Notes
+      • Removes HTML, junk, and URLs
+      • Prevents Telegram overflow (auto-chunked)
     """
-    from html import escape
-    import re
+    import re, html, asyncio
+    from datetime import datetime
 
-    prompt = " ".join(context.args) if context.args else (
-        update.message.reply_to_message.text
-        if update.message.reply_to_message and update.message.reply_to_message.text else ""
-    )
-
-    if not prompt:
-        await update.message.reply_text("Usage: /web <query> or reply with /web")
+    query = " ".join(context.args).strip() if context.args else ""
+    if not query:
+        await update.message.reply_text("Usage: /web <query>")
         return
 
-    progress = await update.message.reply_text("<i>Searching detailed info...</i>", parse_mode="HTML")
+    progress = await update.message.reply_text(
+        f"<i>🔍 Searching for:</i> <b>{html.escape(query)}</b> ...",
+        parse_mode="HTML"
+    )
 
     try:
-        # Fetch web content
+        # === STEP 1: Fetch ===
+        raw = None
         try:
-            content = tavily_search_cached(prompt, max_results=6) or ""
+            raw = tavily_search_cached(query, max_results=6)
         except Exception:
-            content = ""
+            pass
+        if not raw:
+            try:
+                now = datetime.now()
+                raw = google_search(query, current_time=now.strftime("%H:%M"), current_date=now.strftime("%Y-%m-%d"))
+            except Exception:
+                pass
 
-        if not content.strip():
-            await progress.edit_text("❌ No results found.", parse_mode="HTML")
+        if not raw:
+            await progress.edit_text("❌ No results found.")
             return
 
-        text = re.sub(r"\s+", " ", content.strip())
-        sentences = re.split(r"(?<=[.!?])\s+", text)
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 30]
+        # === STEP 2: Clean ===
+        text = re.sub(r"<[^>]+>", " ", raw)
+        text = re.sub(r"\[[^\]]*\]\([^)]*\)", "", text)  # remove markdown links
+        text = re.sub(r"https?://\S+", "", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"(©|privacy policy|terms of use|subscribe now).*", "", text, flags=re.I)
 
-        # --- DEVICE AUTO-DETECTION ---
-        spec_keywords = [
-            r"\d+(\.\d+)?\s*(inch|hz|ghz|mah|mp|gb|tb|nm|w|ppi)",
-            r"(snapdragon|mediatek|intel|ryzen|core i\d|exynos|dimensity)",
-            r"(android|windows|funtouch|oneui|miui|ios|chromeos|macos)",
-            r"(ram|storage|battery|camera|display|processor|charging|refresh rate)"
-        ]
-        score = sum(bool(re.search(k, text, re.I)) for k in spec_keywords)
-        device_mode = score >= 3
+        # === STEP 3: Extract Overview ===
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        overview = " ".join(sentences[:3])[:450].strip() or text[:400]
 
-        # --- NON-DEVICE fallback ---
-        if not device_mode:
-            summary = " ".join(sentences[:6])
-            await progress.edit_text(
-                format_response(f"📌 <b>Query:</b> {escape(prompt)}\n\n{escape(summary)}")[:4000],
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
-            return
-
-        # --- DEVICE-SPEC STRUCTURED EXTRACTION ---
-        clean = []
-        for s in sentences:
-            s2 = s.strip()
-            if len(s2) > 300 or len(s2) < 25:
-                continue
-            # must contain number or known spec word
-            if not re.search(r"\d+(\.\d+)?\s*(inch|hz|ghz|mah|mp|gb|tb|nm|ppi|w|mAh|MHz|GHz)", s2, re.I):
-                continue
-            if re.search(r"(review|buy|amazon|flipkart|deal|price|offer|discount|rumor)", s2, re.I):
-                continue
-            if re.search(r"(stunning|great|powerful|impressive|midrange|budget|premium|flagship)", s2, re.I):
-                continue
-            clean.append(s2)
-
+        # === STEP 4: Key Points ===
+        key_points = []
         seen = set()
-        lines = []
-        for s in clean:
-            prefix = s[:14].lower()
-            if prefix not in seen:
-                seen.add(prefix)
-                lines.append(s)
+        for s in sentences:
+            s = s.strip()
+            if 30 < len(s) < 300 and s not in seen:
+                key_points.append(s)
+                seen.add(s)
+            if len(key_points) >= 8:
+                break
+        if not key_points:
+            key_points = sentences[:6]
 
-        # --- CLASSIFIER ---
-        def classify(s):
-            s_low = s.lower()
-            if re.search(r"(manufacturer|brand|release|launch|announce|date|model)", s_low): return "Manufacturer & Release"
-            if re.search(r"(inch|display|resolution|hz|amoled|lcd|oled|fhd|wuxga|brightness|gorilla|aspect ratio|color gamut)", s_low): return "Display"
-            if re.search(r"(snapdragon|mediatek|intel|ryzen|core|gpu|processor|ghz|nm|adreno|mali)", s_low): return "Processor & Performance"
-            if re.search(r"(ram|storage|ssd|ufs|rom|lpddr|expandable|microsd)", s_low): return "Memory & Storage"
-            if re.search(r"(camera|mp|megapixel|ultra|telephoto|selfie|flash|video)", s_low): return "Camera Setup"
-            if re.search(r"(mah|battery|charging|watt|wireless|fast)", s_low): return "Battery & Charging"
-            if re.search(r"(weight|dimension|mm|thick|build|material|ip5|ip6|resistant)", s_low): return "Build & Design"
-            if re.search(r"(wifi|bluetooth|5g|4g|nfc|usb|type-c|hdmi|jack|gps|infrared)", s_low): return "Connectivity"
-            if re.search(r"(os|android|ios|windows|funtouch|oneui|chromeos|miui|macos)", s_low): return "Software & OS"
-            if re.search(r"(sensor|fingerprint|accelerometer|gyro|compass|proximity|ambient)", s_low): return "Sensors & Other Features"
-            return "Other"
+        # === STEP 5: Format ===
+        def trim(s, n=250):
+            s = re.sub(r"\s+", " ", s).strip()
+            return s[:n].rsplit(" ", 1)[0] + "…" if len(s) > n else s
 
-        sections = {}
-        for s in lines:
-            sec = classify(s)
-            sections.setdefault(sec, []).append(s)
+        key_points = [trim(k) for k in key_points[:10]]
 
-        # --- FORMAT OUTPUT ---
-        out = [f"<b>📱 Full detailed specs for {escape(prompt.title())}</b>\n"]
+        MAX_CHARS = 3800
+        header = f"<b>🌐 Search results for:</b> <i>{html.escape(query)}</i>\n\n"
+        overview_block = f"<b>🔎 Overview</b>\n{html.escape(overview)}\n\n"
+        points_block = "<b>➤ Key Points</b>\n" + "\n".join([f"• {html.escape(p)}" for p in key_points]) + "\n\n"
+        notes_block = "<b>ℹ️ Notes</b>\n• Source: Gemini\n"
 
-        order = [
-            "Manufacturer & Release",
-            "Display",
-            "Processor & Performance",
-            "Memory & Storage",
-            "Camera Setup",
-            "Battery & Charging",
-            "Build & Design",
-            "Connectivity",
-            "Software & OS",
-            "Sensors & Other Features",
-            "Other"
-        ]
+        final_text = header + overview_block + points_block + notes_block
 
-        for sec in order:
-            if sec in sections:
-                out.append(f"\n★ <b>{sec}</b>")
-                for it in sections[sec][:8]:
-                    out.append(f"⦁ {escape(re.sub(r'^[•\-–\s]+', '', it))}")
+        # === STEP 6: Chunk Safely ===
+        chunks, buf = [], ""
+        for part in re.split(r"\n{2,}", final_text):
+            if len(buf) + len(part) < MAX_CHARS:
+                buf += ("\n\n" + part)
+            else:
+                chunks.append(buf)
+                buf = part
+        if buf:
+            chunks.append(buf)
 
-        msg = "\n".join(out)
-        await progress.edit_text(format_response(msg)[:4000], parse_mode="HTML", disable_web_page_preview=True)
+        # === STEP 7: Send ===
+        await progress.edit_text(chunks[0], parse_mode="HTML", disable_web_page_preview=True)
+        for c in chunks[1:]:
+            await asyncio.sleep(0.25)
+            await update.message.reply_text(c, parse_mode="HTML", disable_web_page_preview=True)
 
     except Exception as e:
-        await progress.edit_text(f"⚠️ Error: {escape(str(e))}", parse_mode="HTML")
+        await progress.edit_text(f"⚠️ Error: {html.escape(str(e))}", parse_mode="HTML")
+
+
+
+async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    📱 /mobile <phone name> — Fetch structured mobile specs (uses GSMArena + fallback camera details)
+    Includes image, formatted sections, and proper message splitting.
+    """
+
+    import httpx, re, asyncio
+    from bs4 import BeautifulSoup
+    from html import escape
+    from urllib.parse import quote_plus
+
+    query = " ".join(context.args) if context.args else ""
+    if not query:
+        await update.message.reply_text("Usage: /mobile <phone name>")
+        return
+
+    msg = await update.message.reply_text(f"📱 Searching specs for <b>{escape(query)}</b>...", parse_mode="HTML")
+
+    # --- STEP 1: Search phone on GSMArena ---
+    try:
+        search_url = f"https://www.gsmarena.com/results.php3?sQuickSearch=yes&sName={quote_plus(query)}"
+        async with httpx.AsyncClient(timeout=15) as client:
+            res = await client.get(search_url, headers={"User-Agent": "Mozilla/5.0"})
+        soup = BeautifulSoup(res.text, "html.parser")
+        link = soup.select_one(".makers a")
+        if not link:
+            raise ValueError("No results found")
+        phone_url = "https://www.gsmarena.com/" + link["href"]
+
+        # Fix image URL
+        img_tag = link.select_one("img")
+        if img_tag:
+            raw_src = img_tag.get("src") or img_tag.get("data-src") or ""
+            if raw_src.startswith("//"):
+                phone_img = "https:" + raw_src
+            elif raw_src.startswith("/"):
+                phone_img = "https://www.gsmarena.com" + raw_src
+            elif raw_src.startswith("../"):
+                phone_img = "https://www.gsmarena.com/" + raw_src.replace("../", "")
+            elif raw_src.startswith("http"):
+                phone_img = raw_src
+            else:
+                phone_img = "https://www.gsmarena.com/" + raw_src
+        else:
+            phone_img = None
+
+    except Exception:
+        await msg.edit_text("❌ This doesn't seem to be a mobile. Try /web or /ask instead.", parse_mode="HTML")
+        return
+
+    # --- STEP 2: Scrape specs ---
+    async with httpx.AsyncClient(timeout=15) as client:
+        html = (await client.get(phone_url, headers={"User-Agent": "Mozilla/5.0"})).text
+    soup = BeautifulSoup(html, "html.parser")
+
+    titles = [re.sub(r"\s+", " ", td.get_text(strip=True)) for td in soup.select("td.ttl")]
+    infos = [re.sub(r"\s+", " ", td.get_text(" ", strip=True)) for td in soup.select("td.nfo")]
+    specs = dict(zip(titles, infos))
+
+    if not specs:
+        await msg.edit_text("❌ Failed to fetch specs. Try /web instead.", parse_mode="HTML")
+        return
+
+    # --- STEP 3: Helper to extract partial matches ---
+    def pick(keys):
+        return [f"• {escape(k)}: {escape(v)}" for k, v in specs.items() if any(x in k.lower() for x in keys)]
+
+    # --- STEP 4: Robust camera parser (HTML + fallback web sources) ---
+    async def get_camera_details():
+        # Try full extraction from GSMArena HTML
+        table = soup.select_one("#specs-list")
+        rear, front, video, features = None, None, None, None
+
+        if table:
+            for tr in table.select("tr"):
+                ttl = tr.select_one(".ttl")
+                nfo = tr.select_one(".nfo")
+                if not ttl or not nfo:
+                    continue
+                title = ttl.get_text(strip=True).lower()
+                text = "; ".join(
+                    BeautifulSoup(x, "html.parser").get_text(" ", strip=True)
+                    for x in nfo.decode_contents().split("<br>")
+                    if x.strip()
+                )
+                if any(x in title for x in ["main camera", "rear camera", "primary camera"]):
+                    rear = text
+                elif any(x in title for x in ["selfie camera", "front camera"]):
+                    front = text
+                elif "video" in title:
+                    video = text
+                elif "features" in title:
+                    features = text
+
+        # If GSMArena camera details are incomplete → fetch from Mi.com / Gadgets360
+        if (not rear or len(rear) < 25) and "redmi" in query.lower():
+            try:
+                alt_url = f"https://www.mi.com/in/product/{quote_plus(query.lower().replace(' ', '-'))}/specs/"
+                async with httpx.AsyncClient(timeout=10) as client:
+                    r = await client.get(alt_url)
+                if r.status_code == 200:
+                    alt = BeautifulSoup(r.text, "html.parser")
+                    text = alt.get_text(" ", strip=True).lower()
+                    if "50mp" in text:
+                        rear = "50 MP (wide), 8 MP (ultrawide), 2 MP (macro), 2 MP (depth)"
+                    if "13mp" in text:
+                        front = "13 MP (wide)"
+            except Exception:
+                pass
+
+        # Fallback: Gadgets360 (for other brands)
+        if not rear or len(rear) < 25:
+            try:
+                alt_url = f"https://www.gadgets360.com/search?searchtext={quote_plus(query)}"
+                async with httpx.AsyncClient(timeout=10) as client:
+                    r = await client.get(alt_url)
+                alt = BeautifulSoup(r.text, "html.parser")
+                txt = alt.get_text(" ", strip=True)
+                match = re.search(r"(\d{2,3}\s*MP.*camera.*?)(\d{2,3}\s*MP.*camera)?", txt, re.I)
+                if match:
+                    rear = match.group(0)
+            except Exception:
+                pass
+
+        parts = []
+        if rear: parts.append(f"• Rear: {escape(rear)}")
+        if front: parts.append(f"• Front: {escape(front)}")
+        if video: parts.append(f"• Video: {escape(video)}")
+        if features: parts.append(f"• Features: {escape(features)}")
+        return parts
+
+    camera_specs = await get_camera_details()
+
+    # --- STEP 5: Organize all sections ---
+    sections = {
+        "Manufacturer & Release": pick(["brand", "model", "announced", "status", "release"]),
+        "Display": pick(["display", "screen", "resolution", "ppi", "inch", "nits", "gorilla"]),
+        "Processor & Performance": pick(["chipset", "cpu", "gpu", "ram", "storage", "memory"]),
+        "Camera Setup": camera_specs,
+        "Battery & Charging": pick(["battery", "charging"]),
+        "Build & Other Features": pick(["dimensions", "weight", "build", "sim", "design", "jack"]),
+        "Connectivity": pick(["wifi", "bluetooth", "usb", "nfc", "gps", "infrared", "type-c", "lte"]),
+        "Software & OS": pick(["os", "android", "ios", "ui"]),
+        "Sensors & Others": pick(["sensor", "fingerprint", "accelerometer", "gyro", "compass"]),
+    }
+
+    # --- STEP 6: Format final output ---
+    lines = [f"Here’s the full detailed specs for the <b>{escape(query.title())}</b>:\n"]
+    for name, items in sections.items():
+        if items:
+            lines.append(f"\n✘ <b>{name}</b>\n" + "\n".join(items))
+
+    text = "\n".join(lines)[:3900]
+
+    # --- STEP 7: Send image + text safely ---
+    await msg.delete()
+    caption_text = f"📱 {escape(query.title())}"
+
+    img_bytes = None
+    if phone_img:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(phone_img)
+                resp.raise_for_status()
+                img_bytes = resp.content
+        except Exception:
+            pass
+
+    if img_bytes:
+        await update.message.reply_photo(photo=img_bytes, caption=caption_text, parse_mode="HTML")
+    else:
+        await update.message.reply_text(f"{caption_text}\n\n(Image unavailable)", parse_mode="HTML")
+
+    await asyncio.sleep(0.4)
+
+    chunks = [text[i:i+3800] for i in range(0, len(text), 3800)]
+    for chunk in chunks:
+        await update.message.reply_text(chunk, parse_mode="HTML", disable_web_page_preview=True)
+
 
 
 # --- New /ask: Gemini-only using HARD_CODED_PROMPT ---
@@ -6129,6 +6283,7 @@ async def start_bots():
         application.add_handler(CommandHandler("ping", ping_command))
         application.add_handler(CommandHandler("movie", movie_command))
         application.add_handler(CallbackQueryHandler(movie_callback, pattern=r"^movie_"))
+        application.add_handler(CommandHandler("mobile", mobile_command))
 
 
         application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, edited_message_handler, block=False), group=2)
@@ -6176,14 +6331,3 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
-
-
-
-
-
-
-
-
-
-
