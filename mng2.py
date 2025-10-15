@@ -1746,9 +1746,9 @@ async def is_member_admin(chat, user_id: int) -> bool:
 async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Universal /web command:
-    - Replies to ANY query normally.
-    - Automatically detects if the content is device-spec oriented and reformats accordingly.
-    - No hardcoded keywords like "specs" or "laptop" used.
+    - Replies to any query.
+    - Automatically detects device-type topics and shows full structured specs.
+    - Outputs clean spec sections like ★ Display, ★ Processor, etc.
     """
     from html import escape
     import re
@@ -1762,10 +1762,10 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /web <query> or reply with /web")
         return
 
-    progress = await update.message.reply_text("<i>Searching...</i>", parse_mode="HTML")
+    progress = await update.message.reply_text("<i>Searching detailed info...</i>", parse_mode="HTML")
 
     try:
-        # Get search content (use your cached Tavily or whichever engine you already use)
+        # Fetch web content
         try:
             content = tavily_search_cached(prompt, max_results=6) or ""
         except Exception:
@@ -1775,75 +1775,98 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await progress.edit_text("❌ No results found.", parse_mode="HTML")
             return
 
-        # Normalize
         text = re.sub(r"\s+", " ", content.strip())
         sentences = re.split(r"(?<=[.!?])\s+", text)
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 40]
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 30]
 
-        # --- AUTO-DETECTION OF DEVICE SPECS CONTENT ---
+        # --- DEVICE AUTO-DETECTION ---
         spec_keywords = [
-            r"\d+(\.\d+)?\s*(inch|hz|ghz|mah|mp|gb|tb|nm|w|wh)",
-            r"(snapdragon|mediatek|dimensity|intel|ryzen|core i\d|apple m\d|exynos)",
-            r"(android|windows|funtouch|oneui|miui|ios|chromeos)",
+            r"\d+(\.\d+)?\s*(inch|hz|ghz|mah|mp|gb|tb|nm|w|ppi)",
+            r"(snapdragon|mediatek|intel|ryzen|core i\d|exynos|dimensity)",
+            r"(android|windows|funtouch|oneui|miui|ios|chromeos|macos)",
             r"(ram|storage|battery|camera|display|processor|charging|refresh rate)"
         ]
         score = sum(bool(re.search(k, text, re.I)) for k in spec_keywords)
-        device_mode = score >= 3  # automatically detected
+        device_mode = score >= 3
 
-        # If NOT device-related, send plain summary
+        # --- NON-DEVICE fallback ---
         if not device_mode:
-            summary = " ".join(sentences[:5])
-            await progress.edit_text(format_response(f"📌 <b>Query:</b> {escape(prompt)}\n\n{escape(summary)}")[:4000],
-                                     parse_mode="HTML",
-                                     disable_web_page_preview=True)
+            summary = " ".join(sentences[:6])
+            await progress.edit_text(
+                format_response(f"📌 <b>Query:</b> {escape(prompt)}\n\n{escape(summary)}")[:4000],
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
             return
 
-        # --- DEVICE STRUCTURED PARSING ---
+        # --- DEVICE-SPEC STRUCTURED EXTRACTION ---
+        clean = []
+        for s in sentences:
+            s2 = s.strip()
+            if len(s2) > 300 or len(s2) < 25:
+                continue
+            # must contain number or known spec word
+            if not re.search(r"\d+(\.\d+)?\s*(inch|hz|ghz|mah|mp|gb|tb|nm|ppi|w|mAh|MHz|GHz)", s2, re.I):
+                continue
+            if re.search(r"(review|buy|amazon|flipkart|deal|price|offer|discount|rumor)", s2, re.I):
+                continue
+            if re.search(r"(stunning|great|powerful|impressive|midrange|budget|premium|flagship)", s2, re.I):
+                continue
+            clean.append(s2)
+
+        seen = set()
+        lines = []
+        for s in clean:
+            prefix = s[:14].lower()
+            if prefix not in seen:
+                seen.add(prefix)
+                lines.append(s)
+
+        # --- CLASSIFIER ---
         def classify(s):
             s_low = s.lower()
-            if re.search(r"(inch|display|resolution|hz|amoled|lcd|oled|fhd|wuxga)", s_low): return "Display"
-            if re.search(r"(snapdragon|mediatek|intel|ryzen|core|gpu|processor|ghz)", s_low): return "Performance"
-            if re.search(r"(ram|storage|ssd|ufs|rom|lpddr)", s_low): return "Memory & Storage"
-            if re.search(r"(camera|mp|megapixel|ultra|telephoto|selfie|flash)", s_low): return "Camera"
-            if re.search(r"(mah|battery|charging|watt)", s_low): return "Battery"
-            if re.search(r"(wifi|bluetooth|5g|4g|nfc|usb|type-c|hdmi|jack|gps)", s_low): return "Connectivity"
-            if re.search(r"(os|android|ios|windows|funtouch|oneui|chromeos)", s_low): return "Software & OS"
-            if re.search(r"(weight|mm|dimension|size|thin)", s_low): return "Dimensions & Weight"
+            if re.search(r"(manufacturer|brand|release|launch|announce|date|model)", s_low): return "Manufacturer & Release"
+            if re.search(r"(inch|display|resolution|hz|amoled|lcd|oled|fhd|wuxga|brightness|gorilla|aspect ratio|color gamut)", s_low): return "Display"
+            if re.search(r"(snapdragon|mediatek|intel|ryzen|core|gpu|processor|ghz|nm|adreno|mali)", s_low): return "Processor & Performance"
+            if re.search(r"(ram|storage|ssd|ufs|rom|lpddr|expandable|microsd)", s_low): return "Memory & Storage"
+            if re.search(r"(camera|mp|megapixel|ultra|telephoto|selfie|flash|video)", s_low): return "Camera Setup"
+            if re.search(r"(mah|battery|charging|watt|wireless|fast)", s_low): return "Battery & Charging"
+            if re.search(r"(weight|dimension|mm|thick|build|material|ip5|ip6|resistant)", s_low): return "Build & Design"
+            if re.search(r"(wifi|bluetooth|5g|4g|nfc|usb|type-c|hdmi|jack|gps|infrared)", s_low): return "Connectivity"
+            if re.search(r"(os|android|ios|windows|funtouch|oneui|chromeos|miui|macos)", s_low): return "Software & OS"
+            if re.search(r"(sensor|fingerprint|accelerometer|gyro|compass|proximity|ambient)", s_low): return "Sensors & Other Features"
             return "Other"
 
-        grouped = {}
-        for s in sentences:
-            if len(s) > 300:  # skip long irrelevant text
-                continue
+        sections = {}
+        for s in lines:
             sec = classify(s)
-            grouped.setdefault(sec, []).append(s)
+            sections.setdefault(sec, []).append(s)
 
-        quick_lines = []
-        for sec in ("Display", "Performance", "Memory & Storage", "Camera", "Battery"):
-            if sec in grouped and grouped[sec]:
-                quick_lines.append(grouped[sec][0])
+        # --- FORMAT OUTPUT ---
+        out = [f"<b>📱 Full detailed specs for {escape(prompt.title())}</b>\n"]
 
-        # Build formatted response
-        out_lines = [f"📌 <b>Query:</b> {escape(prompt)}\n"]
-        if quick_lines:
-            qs = " • ".join([re.sub(r'\s+', ' ', q) for q in quick_lines[:4]])
-            out_lines.append(f"🔹 <b>Quick Specs:</b> {escape(qs)}\n")
-
-        preferred_order = [
-            "Display", "Performance", "Memory & Storage", "Camera",
-            "Battery", "Connectivity", "Software & OS", "Dimensions & Weight", "Other"
+        order = [
+            "Manufacturer & Release",
+            "Display",
+            "Processor & Performance",
+            "Memory & Storage",
+            "Camera Setup",
+            "Battery & Charging",
+            "Build & Design",
+            "Connectivity",
+            "Software & OS",
+            "Sensors & Other Features",
+            "Other"
         ]
 
-        for sec in preferred_order:
-            if sec in grouped:
-                out_lines.append(f"<b>{sec}:</b>")
-                for it in grouped[sec][:6]:
-                    out_lines.append(f"• {escape(it)}")
-                out_lines.append("────────────")
+        for sec in order:
+            if sec in sections:
+                out.append(f"\n★ <b>{sec}</b>")
+                for it in sections[sec][:8]:
+                    out.append(f"⦁ {escape(re.sub(r'^[•\-–\s]+', '', it))}")
 
-        await progress.edit_text(format_response("\n".join(out_lines))[:4000],
-                                 parse_mode="HTML",
-                                 disable_web_page_preview=True)
+        msg = "\n".join(out)
+        await progress.edit_text(format_response(msg)[:4000], parse_mode="HTML", disable_web_page_preview=True)
 
     except Exception as e:
         await progress.edit_text(f"⚠️ Error: {escape(str(e))}", parse_mode="HTML")
@@ -6153,6 +6176,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
