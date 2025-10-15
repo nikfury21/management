@@ -1745,153 +1745,108 @@ async def is_member_admin(chat, user_id: int) -> bool:
 
 async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Smart structured web-only fetcher.
-    Handles phones, laptops, and general device specs cleanly.
-    Filters junk, organizes info into precise sections.
-    No Gemini, no sources.
+    Universal /web command:
+    - Replies to ANY query normally.
+    - Automatically detects if the content is device-spec oriented and reformats accordingly.
+    - No hardcoded keywords like "specs" or "laptop" used.
     """
-    prompt = ' '.join(context.args) if context.args else (
+    from html import escape
+    import re
+
+    prompt = " ".join(context.args) if context.args else (
         update.message.reply_to_message.text
         if update.message.reply_to_message and update.message.reply_to_message.text else ""
     )
+
     if not prompt:
-        await update.message.reply_text("Usage: /web <your question> or reply to a message with /web")
+        await update.message.reply_text("Usage: /web <query> or reply with /web")
         return
 
-    progress = await update.message.reply_text("<i>Fetching structured info...</i>", parse_mode="HTML")
+    progress = await update.message.reply_text("<i>Searching...</i>", parse_mode="HTML")
 
     try:
-        # === Fetch web data ===
+        # Get search content (use your cached Tavily or whichever engine you already use)
         try:
-            search_results = tavily_search_cached(prompt, max_results=6) or ""
-        except Exception as e:
-            print("[web_command] tavily_search_cached error:", e)
-            search_results = ""
+            content = tavily_search_cached(prompt, max_results=6) or ""
+        except Exception:
+            content = ""
 
-        if not search_results.strip():
-            await progress.edit_text(
-                f"❗ No live web snippets found for: <b>{prompt}</b>",
-                parse_mode="HTML",
-                disable_web_page_preview=True
-            )
+        if not content.strip():
+            await progress.edit_text("❌ No results found.", parse_mode="HTML")
             return
 
-        # === Clean text ===
-        text = re.sub(r"\s+", " ", search_results.strip())
-        lines = re.split(r"(?<=[.!?])\s+", text)
-        clean_lines = []
-        for l in lines:
-            l = l.strip()
-            if len(l) < 25 or len(l) > 250:
-                continue
-            if re.search(r"(https?://|www\.|facebook|twitter|instagram|buy|click|comment|follow|blog|subscribe|offer|price in|₹|\$)", l, re.I):
-                continue
-            if re.search(r"(great performance|handle any task|powerful performance|designed for comfort|best choice|superior experience)", l, re.I):
-                continue
-            clean_lines.append(l)
+        # Normalize
+        text = re.sub(r"\s+", " ", content.strip())
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 40]
 
-        # === Intent classification ===
-        low_text = text.lower()
-        is_laptop = any(k in low_text for k in [
-            "laptop", "notebook", "macbook", "chromebook", "intel", "ryzen", "ssd", "hdd", "windows", "keyboard", "trackpad"
-        ])
-        is_phone = any(k in low_text for k in [
-            "smartphone", "display", "camera", "battery", "android", "ios", "funtouch", "snapdragon", "dimensity", "mobile", "screen"
-        ])
-        is_engine = any(k in low_text for k in [
-            "engine", "horsepower", "hp", "torque", "displacement", "cc", "diesel", "petrol"
-        ])
+        # --- AUTO-DETECTION OF DEVICE SPECS CONTENT ---
+        spec_keywords = [
+            r"\d+(\.\d+)?\s*(inch|hz|ghz|mah|mp|gb|tb|nm|w|wh)",
+            r"(snapdragon|mediatek|dimensity|intel|ryzen|core i\d|apple m\d|exynos)",
+            r"(android|windows|funtouch|oneui|miui|ios|chromeos)",
+            r"(ram|storage|battery|camera|display|processor|charging|refresh rate)"
+        ]
+        score = sum(bool(re.search(k, text, re.I)) for k in spec_keywords)
+        device_mode = score >= 3  # automatically detected
 
-        # === Section classifier ===
-        def match_section(sentence):
-            s = sentence.lower()
-            # shared
-            if any(k in s for k in ["display", "screen", "inch", "resolution", "refresh", "amoled", "oled", "lcd", "ips", "ppi"]):
-                return "Display"
-            if any(k in s for k in ["processor", "chip", "cpu", "ghz", "gpu", "intel", "ryzen", "mediatek", "snapdragon", "m1", "m2"]):
-                return "Performance"
-            if any(k in s for k in ["graphics", "gpu", "nvidia", "geforce", "rtx", "radeon"]):
-                return "Graphics"
-            if any(k in s for k in ["camera", "megapixel", "mp", "lens", "selfie", "rear camera", "front camera", "optics"]):
-                return "Camera"
-            if any(k in s for k in ["battery", "mah", "charging", "watt", "power adapter", "hours battery", "fast charge"]):
-                return "Battery"
-            if any(k in s for k in ["ram", "storage", "rom", "memory", "ssd", "hdd", "ufs", "lpddr", "expandable"]):
-                return "Memory & Storage"
-            if any(k in s for k in ["wifi", "bluetooth", "5g", "4g", "nfc", "usb", "port", "jack", "hdmi", "ethernet", "type-c", "gps"]):
-                return "Connectivity"
-            if any(k in s for k in ["speaker", "audio", "sound", "stereo", "dolby"]):
-                return "Audio"
-            if any(k in s for k in ["keyboard", "trackpad", "touchpad", "keys", "backlit"]):
-                return "Keyboard & Input"
-            if any(k in s for k in ["android", "ios", "windows", "macos", "chromeos", "software", "ui", "version", "os"]):
-                return "Software & OS"
-            if any(k in s for k in ["sensor", "fingerprint", "gyro", "accelerometer", "compass", "headphone"]):
-                return "Sensors & Ports"
-            if any(k in s for k in ["dimension", "mm", "weight", "height", "thickness", "size"]):
-                return "Dimensions & Weight"
-            if any(k in s for k in ["release", "launch", "announced", "available"]):
-                return "Release Date"
-            if any(k in s for k in ["price", "variant", "version", "model"]):
-                return "Variants"
-            if any(k in s for k in ["engine", "motor", "hp", "horsepower", "torque", "cc", "displacement", "fuel", "diesel", "petrol", "kw"]):
-                return "Engine"
-            return None
+        # If NOT device-related, send plain summary
+        if not device_mode:
+            summary = " ".join(sentences[:5])
+            await progress.edit_text(format_response(f"📌 <b>Query:</b> {escape(prompt)}\n\n{escape(summary)}")[:4000],
+                                     parse_mode="HTML",
+                                     disable_web_page_preview=True)
+            return
 
-        # === Group lines by section ===
+        # --- DEVICE STRUCTURED PARSING ---
+        def classify(s):
+            s_low = s.lower()
+            if re.search(r"(inch|display|resolution|hz|amoled|lcd|oled|fhd|wuxga)", s_low): return "Display"
+            if re.search(r"(snapdragon|mediatek|intel|ryzen|core|gpu|processor|ghz)", s_low): return "Performance"
+            if re.search(r"(ram|storage|ssd|ufs|rom|lpddr)", s_low): return "Memory & Storage"
+            if re.search(r"(camera|mp|megapixel|ultra|telephoto|selfie|flash)", s_low): return "Camera"
+            if re.search(r"(mah|battery|charging|watt)", s_low): return "Battery"
+            if re.search(r"(wifi|bluetooth|5g|4g|nfc|usb|type-c|hdmi|jack|gps)", s_low): return "Connectivity"
+            if re.search(r"(os|android|ios|windows|funtouch|oneui|chromeos)", s_low): return "Software & OS"
+            if re.search(r"(weight|mm|dimension|size|thin)", s_low): return "Dimensions & Weight"
+            return "Other"
+
         grouped = {}
-        for l in clean_lines:
-            sec = match_section(l)
-            if sec:
-                grouped.setdefault(sec, [])
-                if l not in grouped[sec] and len(grouped[sec]) < 5:
-                    grouped[sec].append(l)
+        for s in sentences:
+            if len(s) > 300:  # skip long irrelevant text
+                continue
+            sec = classify(s)
+            grouped.setdefault(sec, []).append(s)
 
-        # === Section order (phones/laptops differ slightly) ===
-        order = (
-            ["Display", "Performance", "Graphics", "Memory & Storage", "Connectivity", "Audio", "Keyboard & Input",
-             "Software & OS", "Dimensions & Weight", "Battery", "Release Date", "Variants", "Engine"]
-            if is_laptop
-            else ["Display", "Performance", "Camera", "Battery", "Memory & Storage", "Connectivity", "Audio",
-                  "Software & OS", "Sensors & Ports", "Dimensions & Weight", "Release Date", "Variants", "Engine"]
-        )
+        quick_lines = []
+        for sec in ("Display", "Performance", "Memory & Storage", "Camera", "Battery"):
+            if sec in grouped and grouped[sec]:
+                quick_lines.append(grouped[sec][0])
 
-        # === Quick Specs ===
-        quick = []
-        if "Display" in grouped:
-            quick.append(re.sub(r"acer|vivo|samsung|apple|xiaomi|oneplus|realme", "", grouped["Display"][0], flags=re.I))
-        if "Performance" in grouped:
-            quick.append(re.sub(r"powered by", "", grouped["Performance"][0], flags=re.I))
-        if "Graphics" in grouped:
-            quick.append(grouped["Graphics"][0])
-        if "Camera" in grouped:
-            quick.append(re.sub(r"camera|megapixel|mp", "", grouped["Camera"][0], flags=re.I))
-        if "Battery" in grouped:
-            quick.append(grouped["Battery"][0])
-        quick_line = " • ".join(quick[:3]) if quick else ""
+        # Build formatted response
+        out_lines = [f"📌 <b>Query:</b> {escape(prompt)}\n"]
+        if quick_lines:
+            qs = " • ".join([re.sub(r'\s+', ' ', q) for q in quick_lines[:4]])
+            out_lines.append(f"🔹 <b>Quick Specs:</b> {escape(qs)}\n")
 
-        # === Build output ===
-        output = []
-        output.append(f"📌 <b>Query:</b> {prompt}\n")
-        if quick_line:
-            output.append(f"🔹 <b>Quick Specs:</b> {quick_line}\n")
+        preferred_order = [
+            "Display", "Performance", "Memory & Storage", "Camera",
+            "Battery", "Connectivity", "Software & OS", "Dimensions & Weight", "Other"
+        ]
 
-        for sec in order:
+        for sec in preferred_order:
             if sec in grouped:
-                output.append(f"<b>{sec}:</b>")
-                for item in grouped[sec]:
-                    output.append(f"• {item}")
-                output.append("────────────")
+                out_lines.append(f"<b>{sec}:</b>")
+                for it in grouped[sec][:6]:
+                    out_lines.append(f"• {escape(it)}")
+                out_lines.append("────────────")
 
-        if len(output) <= 3:
-            output.append("❌ No detailed specifications found online for this device.")
-
-        # === Send result ===
-        final_text = "\n".join(output)
-        await progress.edit_text(final_text[:4000], parse_mode="HTML", disable_web_page_preview=True)
+        await progress.edit_text(format_response("\n".join(out_lines))[:4000],
+                                 parse_mode="HTML",
+                                 disable_web_page_preview=True)
 
     except Exception as e:
-        await progress.edit_text(f"⚠️ Error: {e}", parse_mode="HTML", disable_web_page_preview=True)
+        await progress.edit_text(f"⚠️ Error: {escape(str(e))}", parse_mode="HTML")
 
 
 # --- New /ask: Gemini-only using HARD_CODED_PROMPT ---
@@ -6198,6 +6153,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
