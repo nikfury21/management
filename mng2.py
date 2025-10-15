@@ -1844,18 +1844,17 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await progress.edit_text(f"⚠️ Error: {html.escape(str(e))}", parse_mode="HTML")
 
 
-
 async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    📱 /mobile <phone name> — Fetch full structured mobile specs.
-    Always tries multiple sources: GSMArena → DeviceSpecifications → 91Mobiles.
-    Ensures detailed results even if GSMArena fails.
+    📱 /mobile <phone name> — Fetch structured full mobile specs.
+    Always returns detailed specs using GSMArena → 91mobiles → DeviceSpecifications → AI fallback.
     """
 
     import httpx, re, asyncio
     from bs4 import BeautifulSoup
     from html import escape
     from urllib.parse import quote_plus
+    from datetime import datetime
 
     query = " ".join(context.args) if context.args else ""
     if not query:
@@ -1863,21 +1862,20 @@ async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     msg = await update.message.reply_text(
-        f"📱 Searching specs for <b>{escape(query)}</b>...", parse_mode="HTML"
+        f"📱 Searching specs for <b>{escape(query)}</b>... hope so hag na de", parse_mode="HTML"
     )
 
     phone_img = None
-    phone_url = None
     specs = {}
 
-    # --- STEP 1: Try GSMArena first ---
+    # --- STEP 1: Try GSMArena search ---
     try:
         search_url = f"https://www.gsmarena.com/results.php3?sQuickSearch=yes&sName={quote_plus(query)}"
         async with httpx.AsyncClient(timeout=15) as client:
             res = await client.get(search_url, headers={"User-Agent": "Mozilla/5.0"})
         soup = BeautifulSoup(res.text, "html.parser")
-
         link = soup.select_one(".makers a")
+
         if not link:
             raise ValueError("No GSMArena result")
 
@@ -1895,28 +1893,23 @@ async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 phone_img = "https://www.gsmarena.com/" + raw_src.replace("../", "")
             elif raw_src.startswith("http"):
                 phone_img = raw_src
-            else:
-                phone_img = "https://www.gsmarena.com/" + raw_src
+
+        # Parse GSMArena specs
+        async with httpx.AsyncClient(timeout=20) as client:
+            html = (await client.get(phone_url, headers={"User-Agent": "Mozilla/5.0"})).text
+        soup = BeautifulSoup(html, "html.parser")
+        titles = [re.sub(r"\s+", " ", td.get_text(strip=True)) for td in soup.select("td.ttl")]
+        infos = [re.sub(r"\s+", " ", td.get_text(" ", strip=True)) for td in soup.select("td.nfo")]
+        specs = dict(zip(titles, infos))
 
     except Exception:
-        phone_url = None
+        specs = {}
 
-    # --- STEP 2: Scrape from GSMArena (if URL found) ---
-    if phone_url:
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                html = (await client.get(phone_url, headers={"User-Agent": "Mozilla/5.0"})).text
-            soup = BeautifulSoup(html, "html.parser")
-            titles = [re.sub(r"\s+", " ", td.get_text(strip=True)) for td in soup.select("td.ttl")]
-            infos = [re.sub(r"\s+", " ", td.get_text(" ", strip=True)) for td in soup.select("td.nfo")]
-            specs = dict(zip(titles, infos))
-        except Exception:
-            specs = {}
-
-    # --- STEP 3: Fallback sources if GSMArena failed ---
+    # --- STEP 2: Fallback web sources ---
     if not specs:
-        await msg.edit_text("⚙️ GSMArena failed — trying alternate sites...", parse_mode="HTML")
+        await msg.edit_text("Phli site ne hag diya, dusre check krta", parse_mode="HTML")
         try:
+            from random import choice
             phone_text = (
                 scrape_gsmarena_specs(query)
                 or scrape_device_specifications(query)
@@ -1926,7 +1919,6 @@ async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             phone_text = None
 
         if phone_text:
-            # Send directly if fallback returned a full text
             if len(phone_text) > 4000:
                 parts = [phone_text[i:i+4000] for i in range(0, len(phone_text), 4000)]
                 await msg.edit_text(parts[0], parse_mode="HTML", disable_web_page_preview=True)
@@ -1935,15 +1927,47 @@ async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await msg.edit_text(phone_text, parse_mode="HTML", disable_web_page_preview=True)
             return
-        else:
-            await msg.edit_text("❌ No specifications found on any major site.", parse_mode="HTML")
-            return
 
-    # --- STEP 4: Helper to extract partial matches ---
+    # --- STEP 3: AI fallback if all fail ---
+    if not specs:
+        await msg.edit_text("Ab ai se hi fetch krna pdega uf...", parse_mode="HTML")
+        try:
+            raw_data = tavily_search_cached(
+                f"{query} full mobile specifications 2024 site:91mobiles.com OR site:gsmarena.com OR site:gadgets360.com OR site:devicespecifications.com",
+                max_results=4
+            )
+        except Exception:
+            raw_data = None
+
+        if raw_data:
+            prompt = f"""
+Generate detailed, structured specifications for the smartphone '{query}' using the text below.
+Format exactly like GSMArena sections with ✘ and • lines.
+Sections: Manufacturer & Release, Display, Performance, Camera Setup, Battery, Build, Connectivity, Software, Sensors.
+
+Raw text:
+{raw_data}
+"""
+            try:
+                ai = safe_generate(gemini_model, prompt)
+                phone_text = ai.text.strip() if ai and ai.text else None
+            except Exception:
+                phone_text = None
+
+            if phone_text:
+                await msg.edit_text(phone_text[:4000], parse_mode="HTML", disable_web_page_preview=True)
+                for i in range(4000, len(phone_text), 4000):
+                    await update.message.reply_text(phone_text[i:i+4000], parse_mode="HTML", disable_web_page_preview=True)
+                return
+
+        await msg.edit_text("❌ Couldn't find or generate detailed specs.", parse_mode="HTML")
+        return
+
+    # --- STEP 4: Helper to extract matches ---
     def pick(keys):
         return [f"• {escape(k)}: {escape(v)}" for k, v in specs.items() if any(x in k.lower() for x in keys)]
 
-    # --- STEP 5: Camera extractor (same as before) ---
+    # --- STEP 5: Camera extractor ---
     async def get_camera_details():
         table = soup.select_one("#specs-list")
         rear, front, video, features = None, None, None, None
@@ -1978,7 +2002,7 @@ async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     camera_specs = await get_camera_details()
 
-    # --- STEP 6: Organize sections ---
+    # --- STEP 6: Sections ---
     sections = {
         "Manufacturer & Release": pick(["brand", "model", "announced", "status", "release"]),
         "Display": pick(["display", "screen", "resolution", "ppi", "inch", "nits", "gorilla"]),
@@ -1991,15 +2015,14 @@ async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Sensors & Others": pick(["sensor", "fingerprint", "accelerometer", "gyro", "compass"]),
     }
 
-    # --- STEP 7: Format final output ---
+    # --- STEP 7: Format output ---
     lines = [f"Here’s the full detailed specs for the <b>{escape(query.title())}</b>:\n"]
     for name, items in sections.items():
         if items:
             lines.append(f"\n✘ <b>{name}</b>\n" + "\n".join(items))
-
     text = "\n".join(lines)[:3900]
 
-    # --- STEP 8: Send results safely ---
+    # --- STEP 8: Send results ---
     await msg.delete()
     caption_text = f"📱 {escape(query.title())}"
 
@@ -2018,11 +2041,10 @@ async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"{caption_text}\n\n(Image unavailable)", parse_mode="HTML")
 
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.4)
     chunks = [text[i:i+3800] for i in range(0, len(text), 3800)]
     for chunk in chunks:
         await update.message.reply_text(chunk, parse_mode="HTML", disable_web_page_preview=True)
-
 
 
 # --- New /ask: Gemini-only using HARD_CODED_PROMPT ---
@@ -6330,4 +6352,5 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
