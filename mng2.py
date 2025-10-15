@@ -1892,8 +1892,25 @@ async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             phone_img = None
 
     except Exception:
-        await msg.edit_text("❌ This doesn't seem to be a mobile. Try /web or /ask instead.", parse_mode="HTML")
+        # Try fallback sources instead of stopping
+        await msg.edit_text("⚙️ Trying alternate sources...", parse_mode="HTML")
+
+        phone_text = scrape_gsmarena_specs(query) or scrape_device_specifications(query) or scrape_91mobiles_specs(query)
+
+        if not phone_text:
+            await msg.edit_text("❌ Couldn't find specs on any site. Try /web instead.", parse_mode="HTML")
+            return
+
+        # If we got something, send it properly
+        if len(phone_text) > 4000:
+            chunks = [phone_text[i:i+4000] for i in range(0, len(phone_text), 4000)]
+            await msg.edit_text(chunks[0], parse_mode="HTML", disable_web_page_preview=True)
+            for chunk in chunks[1:]:
+                await update.message.reply_text(chunk, parse_mode="HTML", disable_web_page_preview=True)
+        else:
+            await msg.edit_text(phone_text, parse_mode="HTML", disable_web_page_preview=True)
         return
+
 
     # --- STEP 2: Scrape specs ---
     async with httpx.AsyncClient(timeout=15) as client:
