@@ -1617,7 +1617,8 @@ async def get_profile_pics(client, message):
 
         # --- Send in batches of 10 ---
         for i in range(0, len(photos), 10):
-            media_group = [InputMediaPhoto(file_id) for file_id in photos[i:i+10]]
+            media_group = [PyroInputMediaPhoto(file_id) for file_id in photos[i:i+10]]
+
             try:
                 await client.send_media_group(chat_id=send_chat_id, media=media_group)
             except Exception:
@@ -4494,7 +4495,16 @@ async def waifu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_to_check = message.from_user
 
     chat = update.effective_chat
-    participants = await tclient.get_participants(await tclient.get_entity(chat.id))
+    # --- New Pyrogram-based participant fetch ---
+    try:
+        participants = []
+        async for member in pyro_client.get_chat_members(chat.id):
+            if not member.user.is_bot and not getattr(member.user, "is_deleted", False):
+                participants.append(member.user)
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Couldn't fetch participants: {e}")
+        return
+
 
     # ✅ New check: user must be in group
     if not any(p.id == user_to_check.id for p in participants):
@@ -6352,5 +6362,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
