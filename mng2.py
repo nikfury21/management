@@ -4409,7 +4409,7 @@ async def get_partner(user_id: int, chat_members):
         partner_id, ts = waifu_data[user_id]
         if now - ts <= WAIFU_EXPIRY_SECONDS:
             return partner_id
-    possible = [m for m in chat_members if m.id != user_id and not m.bot]
+    possible = [m for m in chat_members if m.id != user_id and not m.is_bot]
     if not possible:
         return None
     partner = random.choice(possible)
