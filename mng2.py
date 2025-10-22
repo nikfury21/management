@@ -3633,7 +3633,6 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ All Perplexity API keys are exhausted. Try again later.")
 
 # --- Register the new handler ---
-app.add_handler(CommandHandler("ask", ask_command))
 
 
 
@@ -6342,6 +6341,5 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
