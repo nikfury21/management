@@ -1745,104 +1745,6 @@ async def is_member_admin(chat, user_id: int) -> bool:
 
 
 
-async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    🌐 /web <query>
-    Universal intelligent web search summarizer:
-      • Works for any topic (news, sports, specs, movies, etc.)
-      • Structured & readable: Overview + Key Points + Notes
-      • Removes HTML, junk, and URLs
-      • Prevents Telegram overflow (auto-chunked)
-    """
-    import re, html, asyncio
-    from datetime import datetime
-
-    query = " ".join(context.args).strip() if context.args else ""
-    if not query:
-        await update.message.reply_text("Usage: /web <query>")
-        return
-
-    progress = await update.message.reply_text(
-        f"<i>🔍 Searching for:</i> <b>{html.escape(query)}</b> ...",
-        parse_mode="HTML"
-    )
-
-    try:
-        # === STEP 1: Fetch ===
-        raw = None
-        try:
-            raw = tavily_search_cached(query, max_results=6)
-        except Exception:
-            pass
-        if not raw:
-            try:
-                now = datetime.now()
-                raw = google_search(query, current_time=now.strftime("%H:%M"), current_date=now.strftime("%Y-%m-%d"))
-            except Exception:
-                pass
-
-        if not raw:
-            await progress.edit_text("❌ No results found.")
-            return
-
-        # === STEP 2: Clean ===
-        text = re.sub(r"<[^>]+>", " ", raw)
-        text = re.sub(r"\[[^\]]*\]\([^)]*\)", "", text)  # remove markdown links
-        text = re.sub(r"https?://\S+", "", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        text = re.sub(r"(©|privacy policy|terms of use|subscribe now).*", "", text, flags=re.I)
-
-        # === STEP 3: Extract Overview ===
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        overview = " ".join(sentences[:3])[:450].strip() or text[:400]
-
-        # === STEP 4: Key Points ===
-        key_points = []
-        seen = set()
-        for s in sentences:
-            s = s.strip()
-            if 30 < len(s) < 300 and s not in seen:
-                key_points.append(s)
-                seen.add(s)
-            if len(key_points) >= 8:
-                break
-        if not key_points:
-            key_points = sentences[:6]
-
-        # === STEP 5: Format ===
-        def trim(s, n=250):
-            s = re.sub(r"\s+", " ", s).strip()
-            return s[:n].rsplit(" ", 1)[0] + "…" if len(s) > n else s
-
-        key_points = [trim(k) for k in key_points[:10]]
-
-        MAX_CHARS = 3800
-        header = f"<b>🌐 Search results for:</b> <i>{html.escape(query)}</i>\n\n"
-        overview_block = f"<b>🔎 Overview</b>\n{html.escape(overview)}\n\n"
-        points_block = "<b>➤ Key Points</b>\n" + "\n".join([f"• {html.escape(p)}" for p in key_points]) + "\n\n"
-        notes_block = "<b>ℹ️ Notes</b>\n• Source: Gemini\n"
-
-        final_text = header + overview_block + points_block + notes_block
-
-        # === STEP 6: Chunk Safely ===
-        chunks, buf = [], ""
-        for part in re.split(r"\n{2,}", final_text):
-            if len(buf) + len(part) < MAX_CHARS:
-                buf += ("\n\n" + part)
-            else:
-                chunks.append(buf)
-                buf = part
-        if buf:
-            chunks.append(buf)
-
-        # === STEP 7: Send ===
-        await progress.edit_text(chunks[0], parse_mode="HTML", disable_web_page_preview=True)
-        for c in chunks[1:]:
-            await asyncio.sleep(0.25)
-            await update.message.reply_text(c, parse_mode="HTML", disable_web_page_preview=True)
-
-    except Exception as e:
-        await progress.edit_text(f"⚠️ Error: {html.escape(str(e))}", parse_mode="HTML")
 
 
 async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2047,60 +1949,6 @@ Raw text:
     for chunk in chunks:
         await update.message.reply_text(chunk, parse_mode="HTML", disable_web_page_preview=True)
 
-
-# --- New /ask: Gemini-only using HARD_CODED_PROMPT ---
-async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Extract user prompt
-    prompt = ' '.join(context.args) if context.args else (
-        update.message.reply_to_message.text
-        if update.message.reply_to_message and update.message.reply_to_message.text else ""
-    )
-    if not prompt:
-        await update.message.reply_text(
-            "Usage: /ask <your question> or reply to a message with /ask"
-        )
-        return
-
-    try:
-        progress_msg = await update.message.reply_text(
-            "<i>Thinking...</i>",
-            parse_mode="HTML"
-        )
-
-        # Build simple prompt using HARD_CODED_PROMPT
-        full_prompt = f"""{HARD_CODED_PROMPT}
-
-INSTRUCTIONS:
-- You are Jarvis (the assistant described above). Be polite, clear, and professional — but **do not** use emojis, hearts, sparkles, or decorative symbols.
-- Prefer concise, helpful, and factually correct answers.
-- Use clean Markdown or HTML formatting (bold, lists, etc.) — but no decorative style.
-- If the answer has steps or items, use bullet points or numbered lists.
-- Highlight important terms by surrounding them with **double asterisks** (will be converted to HTML <b>).
-- If the user asks for technical specs, present a compact spec sheet with headings (Display, Performance, Camera, Battery, Other).
-- If the user asks for code, return only the code block (with triple backticks and language) and a short explanation above it if needed.
-- If you don't know, say "I don't know" and suggest 1–2 practical next steps.
-- Never invent factual sources or URLs.
-- Keep tone strictly neutral and emoji-free.
-
-USER QUERY:
-{prompt}
-
-RESPONSE:
-"""
-
-        # Generate with Gemini (no tavily/google search)
-        response = safe_generate(gemini_model, full_prompt)
-        answer = response.text if hasattr(response, "text") else "Sorry, I couldn't generate a response."
-
-    except Exception as e:
-        answer = f"Error: {str(e)}"
-
-    formatted_answer = format_response(answer)
-    await progress_msg.edit_text(
-        formatted_answer,
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
 
 
 
@@ -3654,6 +3502,138 @@ async def unapprove(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+# ==========================================
+# 🤖 NEW /ask COMMAND (Perplexity Integration)
+# ==========================================
+import aiohttp
+import asyncio
+import re
+import json
+from telegram import Update
+from telegram.ext import ContextTypes, CommandHandler
+
+# --- API KEYS (rotate automatically) ---
+PERPLEXITY_API_KEYS = [
+    os.getenv("PPLX1"),
+    os.getenv("PPLX2"),
+    os.getenv("PPLX3"),
+    os.getenv("PPLX4"),
+
+]
+
+key_status = {k: True for k in PERPLEXITY_API_KEYS}
+current_key_index = 0
+key_lock = asyncio.Lock()
+
+async def get_next_key():
+    """Rotate between active API keys."""
+    global current_key_index
+    async with key_lock:
+        active = [k for k, ok in key_status.items() if ok]
+        if not active:
+            return None
+        for _ in range(len(PERPLEXITY_API_KEYS)):
+            key = PERPLEXITY_API_KEYS[current_key_index]
+            current_key_index = (current_key_index + 1) % len(PERPLEXITY_API_KEYS)
+            if key_status[key]:
+                return key
+        return None
+
+def mark_key_as_exhausted(key):
+    key_status[key] = False
+    print(f"⚠️ Perplexity key exhausted: {key}")
+
+# --- System Prompt (Custom personality) ---
+SYSTEM_PROMPT = (
+    "You are a chatting assistant and reply in a friendly and sometimes savage tone. "
+    "Don't reply in a formal or textbook way — sound human and natural. "
+    "Keep replies short, structured, and use **bold** headers, bullet points, and spacing for clarity. "
+    "Never use emojis or long intros. "
+    "When greeted (hi, hello, hey, sup), reply casually in max 2 lines — no explanation of greetings.\n\n"
+    "📱 **Special Rule for Mobile Phones:**\n"
+    "When asked about a phone (like iPhone 15, Samsung S24, Vivo Y200e, etc.), reply exactly in this format:\n\n"
+    "✦ **Manufacturer**\n• Brand name (Launch date)\n\n"
+    "✦ **Display**\n• Size\n• Panel type & resolution\n• Refresh rate\n• Brightness or certifications\n\n"
+    "✦ **Processor**\n• Chipset & architecture\n• GPU details\n• Benchmark if known\n\n"
+    "✦ **RAM & Storage**\n• RAM options & type\n• Storage type\n• Expansion support\n\n"
+    "✦ **Camera**\n• Rear camera setup\n• Front camera details\n\n"
+    "✦ **Battery**\n• Capacity\n• Charging wattage/type\n\n"
+    "✦ **Build & Durability**\n• Material\n• IP rating\n• OS version & Security\n\n"
+    "✦ **Connectivity**\n• 5G bands, Wi-Fi, Bluetooth, GPS, USB, Colors, Dimensions\n\n"
+    "✦ **Extras**\n• Audio, sensors, or special features\n\n"
+    "NEVER explain what each spec means. Use only the bullet-style structured answer."
+)
+
+# --- /ask Command Function ---
+async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❓ Usage: /ask <your question>")
+        return
+
+    query = " ".join(context.args).strip()
+    await update.message.chat.send_action("typing")
+
+    url = "https://api.perplexity.ai/chat/completions"
+    payload = {
+        "model": "sonar",
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ],
+        "max_tokens": 700,
+    }
+
+    # Try available keys in rotation
+    for _ in range(len(PERPLEXITY_API_KEYS)):
+        key = await get_next_key()
+        if not key:
+            await update.message.reply_text("❌ All Perplexity API keys are exhausted. Try later.")
+            return
+
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload) as resp:
+                    data = await resp.json()
+
+                    # --- Error Handling ---
+                    if "error" in data:
+                        err_msg = data["error"].get("message", "").lower()
+                        if "rate limit" in err_msg or "quota" in err_msg or resp.status == 429:
+                            mark_key_as_exhausted(key)
+                            continue
+                        await update.message.reply_text(f"⚠️ API Error: {data['error'].get('message')}")
+                        return
+
+                    # --- Successful Response ---
+                    if "choices" in data and data["choices"]:
+                        reply = data["choices"][0]["message"]["content"].strip()
+
+                        # Cleanup
+                        reply = re.sub(r"\[\d+(?:\]\[\d+)*\]", "", reply)  # remove [1][2]
+                        reply = re.sub(r"\r", "", reply)
+                        reply = re.sub(r"(?:^|\n)-\s*", r"\n• ", reply)  # dash lists
+                        reply = re.sub(r"(?:^|\n)>", r"\n> ", reply)     # blockquotes
+                        reply = re.sub(r"(##+ .+)", r"\n\n\1\n", reply)  # markdown headings
+                        reply = re.sub(r"\n{3,}", "\n\n", reply).strip()
+
+                        await update.message.reply_text(reply, disable_web_page_preview=True)
+                        return
+                    else:
+                        await update.message.reply_text(f"⚠️ Unexpected API response:\n{json.dumps(data, indent=2)}")
+                        return
+        except Exception as e:
+            print(f"❌ Exception with key {key}: {e}")
+            continue
+
+    await update.message.reply_text("❌ All Perplexity API keys are exhausted. Try again later.")
+
+# --- Register the new handler ---
+app.add_handler(CommandHandler("ask", ask_command))
 
 
 
@@ -6262,8 +6242,6 @@ async def start_bots():
         application.add_handler(CommandHandler("setflood", setflood))
         application.add_handler(CommandHandler("setfloodmode", setfloodmode))
         application.add_handler(CommandHandler("blacklistmode", set_blacklist_mode))
-        application.add_handler(CommandHandler("ask", ask_command))
-        application.add_handler(CommandHandler("web", web_command))
         application.add_handler(CommandHandler("unfilter", unfilter))
         application.add_handler(CommandHandler("filter", add_filter_command))
         application.add_handler(CommandHandler("filters", list_filters_command))
@@ -6362,6 +6340,5 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
