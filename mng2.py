@@ -1399,10 +1399,12 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     minutes, seconds = divmod(remainder, 60)
 
     await msg.edit_text(
-        f"🏓 Pong!\n"
-        f"⏱ Latency: {latency:.3f} s\n"
-        f"⏳ Uptime: {days}d {hours}h {minutes}m {seconds}s"
+        f"**Pong!** `{latency:.2f}s`\n"
+        f"**Uptime** - `{days}d {hours}h {minutes}m {seconds}s`\n"
+        f"**Bot of** [PraiseTheFraud](https://t.me/PraiseTheFraud)",
+        parse_mode="Markdown"
     )
+
 
 
 async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1745,209 +1747,6 @@ async def is_member_admin(chat, user_id: int) -> bool:
 
 
 
-
-
-async def mobile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    📱 /mobile <phone name> — Fetch structured full mobile specs.
-    Always returns detailed specs using GSMArena → 91mobiles → DeviceSpecifications → AI fallback.
-    """
-
-    import httpx, re, asyncio
-    from bs4 import BeautifulSoup
-    from html import escape
-    from urllib.parse import quote_plus
-    from datetime import datetime
-
-    query = " ".join(context.args) if context.args else ""
-    if not query:
-        await update.message.reply_text("Usage: /mobile <phone name>")
-        return
-
-    msg = await update.message.reply_text(
-        f"📱 Searching specs for <b>{escape(query)}</b>... hope so hag na de", parse_mode="HTML"
-    )
-
-    phone_img = None
-    specs = {}
-
-    # --- STEP 1: Try GSMArena search ---
-    try:
-        search_url = f"https://www.gsmarena.com/results.php3?sQuickSearch=yes&sName={quote_plus(query)}"
-        async with httpx.AsyncClient(timeout=15) as client:
-            res = await client.get(search_url, headers={"User-Agent": "Mozilla/5.0"})
-        soup = BeautifulSoup(res.text, "html.parser")
-        link = soup.select_one(".makers a")
-
-        if not link:
-            raise ValueError("No GSMArena result")
-
-        phone_url = "https://www.gsmarena.com/" + link["href"]
-
-        # Extract image
-        img_tag = link.select_one("img")
-        if img_tag:
-            raw_src = img_tag.get("src") or img_tag.get("data-src") or ""
-            if raw_src.startswith("//"):
-                phone_img = "https:" + raw_src
-            elif raw_src.startswith("/"):
-                phone_img = "https://www.gsmarena.com" + raw_src
-            elif raw_src.startswith("../"):
-                phone_img = "https://www.gsmarena.com/" + raw_src.replace("../", "")
-            elif raw_src.startswith("http"):
-                phone_img = raw_src
-
-        # Parse GSMArena specs
-        async with httpx.AsyncClient(timeout=20) as client:
-            html = (await client.get(phone_url, headers={"User-Agent": "Mozilla/5.0"})).text
-        soup = BeautifulSoup(html, "html.parser")
-        titles = [re.sub(r"\s+", " ", td.get_text(strip=True)) for td in soup.select("td.ttl")]
-        infos = [re.sub(r"\s+", " ", td.get_text(" ", strip=True)) for td in soup.select("td.nfo")]
-        specs = dict(zip(titles, infos))
-
-    except Exception:
-        specs = {}
-
-    # --- STEP 2: Fallback web sources ---
-    if not specs:
-        await msg.edit_text("Phli site ne hag diya, dusre check krta", parse_mode="HTML")
-        try:
-            from random import choice
-            phone_text = (
-                scrape_gsmarena_specs(query)
-                or scrape_device_specifications(query)
-                or scrape_91mobiles_specs(query)
-            )
-        except Exception:
-            phone_text = None
-
-        if phone_text:
-            if len(phone_text) > 4000:
-                parts = [phone_text[i:i+4000] for i in range(0, len(phone_text), 4000)]
-                await msg.edit_text(parts[0], parse_mode="HTML", disable_web_page_preview=True)
-                for p in parts[1:]:
-                    await update.message.reply_text(p, parse_mode="HTML", disable_web_page_preview=True)
-            else:
-                await msg.edit_text(phone_text, parse_mode="HTML", disable_web_page_preview=True)
-            return
-
-    # --- STEP 3: AI fallback if all fail ---
-    if not specs:
-        await msg.edit_text("Ab ai se hi fetch krna pdega uf...", parse_mode="HTML")
-        try:
-            raw_data = tavily_search_cached(
-                f"{query} full mobile specifications 2024 site:91mobiles.com OR site:gsmarena.com OR site:gadgets360.com OR site:devicespecifications.com",
-                max_results=4
-            )
-        except Exception:
-            raw_data = None
-
-        if raw_data:
-            prompt = f"""
-Generate detailed, structured specifications for the smartphone '{query}' using the text below.
-Format exactly like GSMArena sections with ✘ and • lines.
-Sections: Manufacturer & Release, Display, Performance, Camera Setup, Battery, Build, Connectivity, Software, Sensors.
-
-Raw text:
-{raw_data}
-"""
-            try:
-                ai = safe_generate(gemini_model, prompt)
-                phone_text = ai.text.strip() if ai and ai.text else None
-            except Exception:
-                phone_text = None
-
-            if phone_text:
-                await msg.edit_text(phone_text[:4000], parse_mode="HTML", disable_web_page_preview=True)
-                for i in range(4000, len(phone_text), 4000):
-                    await update.message.reply_text(phone_text[i:i+4000], parse_mode="HTML", disable_web_page_preview=True)
-                return
-
-        await msg.edit_text("❌ Couldn't find or generate detailed specs.", parse_mode="HTML")
-        return
-
-    # --- STEP 4: Helper to extract matches ---
-    def pick(keys):
-        return [f"• {escape(k)}: {escape(v)}" for k, v in specs.items() if any(x in k.lower() for x in keys)]
-
-    # --- STEP 5: Camera extractor ---
-    async def get_camera_details():
-        table = soup.select_one("#specs-list")
-        rear, front, video, features = None, None, None, None
-
-        if table:
-            for tr in table.select("tr"):
-                ttl = tr.select_one(".ttl")
-                nfo = tr.select_one(".nfo")
-                if not ttl or not nfo:
-                    continue
-                title = ttl.get_text(strip=True).lower()
-                text = "; ".join(
-                    BeautifulSoup(x, "html.parser").get_text(" ", strip=True)
-                    for x in nfo.decode_contents().split("<br>")
-                    if x.strip()
-                )
-                if any(x in title for x in ["main camera", "rear camera", "primary camera"]):
-                    rear = text
-                elif any(x in title for x in ["selfie camera", "front camera"]):
-                    front = text
-                elif "video" in title:
-                    video = text
-                elif "features" in title:
-                    features = text
-
-        parts = []
-        if rear: parts.append(f"• Rear: {escape(rear)}")
-        if front: parts.append(f"• Front: {escape(front)}")
-        if video: parts.append(f"• Video: {escape(video)}")
-        if features: parts.append(f"• Features: {escape(features)}")
-        return parts
-
-    camera_specs = await get_camera_details()
-
-    # --- STEP 6: Sections ---
-    sections = {
-        "Manufacturer & Release": pick(["brand", "model", "announced", "status", "release"]),
-        "Display": pick(["display", "screen", "resolution", "ppi", "inch", "nits", "gorilla"]),
-        "Processor & Performance": pick(["chipset", "cpu", "gpu", "ram", "storage", "memory"]),
-        "Camera Setup": camera_specs,
-        "Battery & Charging": pick(["battery", "charging"]),
-        "Build & Other Features": pick(["dimensions", "weight", "build", "sim", "design", "jack"]),
-        "Connectivity": pick(["wifi", "bluetooth", "usb", "nfc", "gps", "infrared", "type-c", "lte"]),
-        "Software & OS": pick(["os", "android", "ios", "ui"]),
-        "Sensors & Others": pick(["sensor", "fingerprint", "accelerometer", "gyro", "compass"]),
-    }
-
-    # --- STEP 7: Format output ---
-    lines = [f"Here’s the full detailed specs for the <b>{escape(query.title())}</b>:\n"]
-    for name, items in sections.items():
-        if items:
-            lines.append(f"\n✘ <b>{name}</b>\n" + "\n".join(items))
-    text = "\n".join(lines)[:3900]
-
-    # --- STEP 8: Send results ---
-    await msg.delete()
-    caption_text = f"📱 {escape(query.title())}"
-
-    img_bytes = None
-    if phone_img:
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(phone_img)
-                resp.raise_for_status()
-                img_bytes = resp.content
-        except Exception:
-            pass
-
-    if img_bytes:
-        await update.message.reply_photo(photo=img_bytes, caption=caption_text, parse_mode="HTML")
-    else:
-        await update.message.reply_text(f"{caption_text}\n\n(Image unavailable)", parse_mode="HTML")
-
-    await asyncio.sleep(0.4)
-    chunks = [text[i:i+3800] for i in range(0, len(text), 3800)]
-    for chunk in chunks:
-        await update.message.reply_text(chunk, parse_mode="HTML", disable_web_page_preview=True)
 
 
 
@@ -3621,7 +3420,12 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         reply = re.sub(r"(##+ .+)", r"\n\n\1\n", reply)  # markdown headings
                         reply = re.sub(r"\n{3,}", "\n\n", reply).strip()
 
-                        await update.message.reply_text(reply, disable_web_page_preview=True)
+                        await update.message.reply_text(
+                            format_response(reply),
+                            parse_mode="HTML",
+                            disable_web_page_preview=True
+                        )
+
                         return
                     else:
                         await update.message.reply_text(f"⚠️ Unexpected API response:\n{json.dumps(data, indent=2)}")
@@ -3630,7 +3434,7 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"❌ Exception with key {key}: {e}")
             continue
 
-    await update.message.reply_text("❌ All Perplexity API keys are exhausted. Try again later.")
+    await update.message.reply_text("❌ All API keys are exhausted. Try again later.")
 
 # --- Register the new handler ---
 
@@ -6341,5 +6145,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
