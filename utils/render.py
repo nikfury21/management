@@ -66,7 +66,7 @@ HTML_TEMPLATE = """
 
     .container {
       font-family: 'Segoe UI','DejaVuBold','DejaVu','ArialUnicode','Symbola','Fallback','Arial','Noto Color Emoji',sans-serif;
-      background: linear-gradient(90deg, #191423, #231c33);
+      background: linear-gradient(90deg, #1a1428, #2a1c45);
       border-radius: 20px;
       color: white;
       padding: 16px 20px;
@@ -78,9 +78,10 @@ HTML_TEMPLATE = """
 
     .name {
       font-size: 24px;
-      color: cyan;
+      color: {{ name_color }};
       line-height: 1.2;
     }
+
 
     .message {
       font-size: 28px;
@@ -108,7 +109,16 @@ HTML_TEMPLATE = """
 </html>
 """
 
-async def create_quote_image(name, message, profile_image=None, output_path="sticker.png"):
+def get_telegram_name_color(user_id: int) -> str:
+    COLORS = [
+        "#E91E63", "#9C27B0", "#3F51B5",
+        "#2196F3", "#009688", "#4CAF50", "#FF5722"
+    ]
+    return COLORS[user_id % len(COLORS)]
+
+
+async def create_quote_image(name, message, profile_image=None, output_path="sticker.png", name_color="#00FFFF"):
+
     # Absolute font paths - UPDATE THESE TO YOUR ACTUAL PATHS
     fallback_font = "fonts/unifont-16.0.04.otf"
     symbola_font  = "fonts/Symbola.ttf"
@@ -144,7 +154,9 @@ async def create_quote_image(name, message, profile_image=None, output_path="sti
         dejavu_bold=dejavu_bold,
         arial_unicode=arial_unicode,
         arial_font=arial_font,
+        name_color=name_color,
     )
+
 
     try:
         async with async_playwright() as p:
@@ -193,7 +205,14 @@ async def send_quote_sticker(bot, chat_id, name, message, profile_image=None):
     output_path = os.path.join(temp_dir, f"sticker_{uuid.uuid4().hex}.png")
     
     try:
-        await create_quote_image(name, message, profile_image, output_path)
+        await create_quote_image(
+          name,
+          message,
+          profile_image,
+          output_path,
+          name_color=get_telegram_name_color(uuid.uuid4().int)
+      )
+
         
         if not os.path.exists(output_path):
             await bot.send_message(chat_id, "⚠️ Failed to generate sticker. Please try again!")
