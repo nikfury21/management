@@ -206,13 +206,17 @@ async def send_quote_sticker(bot, chat_id, name, message, profile_image=None):
     output_path = os.path.join(temp_dir, f"sticker_{uuid.uuid4().hex}.png")
     
     try:
+        user_id = getattr(name, "id", None) or 0
+        name_color = get_telegram_name_color(user_id)
+        
         await create_quote_image(
-          name,
-          message,
-          profile_image,
-          output_path,
-          name_color=get_telegram_name_color(uuid.uuid4().int)
-      )
+            name,
+            message,
+            profile_image,
+            output_path,
+            name_color=name_color
+        )
+
 
         
         if not os.path.exists(output_path):
@@ -232,4 +236,5 @@ async def send_quote_sticker(bot, chat_id, name, message, profile_image=None):
                 os.remove(output_path)
         except Exception as e:
             print(f"Error deleting temp file: {e}")
+
 
