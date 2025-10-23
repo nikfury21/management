@@ -1399,11 +1399,13 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     minutes, seconds = divmod(remainder, 60)
 
     await msg.edit_text(
-        f"**Pong!** `{latency:.2f}s`\n"
-        f"**Uptime** - `{days}d {hours}h {minutes}m {seconds}s`\n"
-        f"**Bot of** [PraiseTheFraud](https://t.me/PraiseTheFraud)",
-        parse_mode="Markdown"
+        f"<b>Pong!</b> <code>{latency:.2f}s</code>\n"
+        f"<b>Uptime</b> - <code>{days}d {hours}h {minutes}m {seconds}s</code>\n"
+        f"<b>Bot of</b> <a href='https://t.me/PraiseTheFraud'>F U R Y</a>",
+        parse_mode="HTML",
+        disable_web_page_preview=True
     )
+
 
 
 
@@ -6144,7 +6146,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
