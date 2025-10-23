@@ -6095,7 +6095,6 @@ async def start_bots():
         application.add_handler(CommandHandler("ping", ping_command))
         application.add_handler(CommandHandler("movie", movie_command))
         application.add_handler(CallbackQueryHandler(movie_callback, pattern=r"^movie_"))
-        application.add_handler(CommandHandler("mobile", mobile_command))
         application.add_handler(CommandHandler("ask", ask_command))
 
 
@@ -6145,6 +6144,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
