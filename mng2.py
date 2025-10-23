@@ -1926,6 +1926,178 @@ def boldify(text: str) -> str:
     """Convert Markdown-style **bold** to HTML <b>bold</b>"""
     return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
 
+# ================== FONT & SYMBOL GENERATOR MODULE ==================
+# (merged from font2.py — full logic intact, no token conflicts)
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import CommandHandler, CallbackQueryHandler, ContextTypes
+import logging, random, unicodedata, math, itertools
+from uuid import uuid4
+
+PAGE_SIZE = 10
+TARGET_FONTS = 420
+MAX_ATTEMPTS = 10000
+logger = logging.getLogger(__name__)
+
+ALPHABET_LO = "abcdefghijklmnopqrstuvwxyz"
+ALPHABET_UP = ALPHABET_LO.upper()
+DIGITS = "0123456789"
+
+# --- Pools for aesthetic variants ---
+char_pools = {
+    'a': ['a','ɑ','α','ᴀ','ą','à','á','â','ä'],
+    'b': ['b','Ь','в','Ƅ','ɓ','ᵇ'],
+    'c': ['c','ϲ','ⅽ','ç','ć'],
+    'd': ['d','ԁ','ḓ','ď'],
+    'e': ['e','е','ℯ','è','é','ê','ě'],
+    'f': ['f','ƒ','ḟ'],
+    'g': ['g','ɡ','ǵ'],
+    'h': ['h','һ','ḥ'],
+    'i': ['i','і','ι','ı','í','ì'],
+    'j': ['j','ĵ'],
+    'k': ['k','κ','ƙ'],
+    'l': ['l','ⅼ','Ɩ','ɩ'],
+    'm': ['m','𝚖','ṃ'],
+    'n': ['n','п','ṅ','ń'],
+    'o': ['o','о','σ','ɵ','ó','ò','ô'],
+    'p': ['p','р','ρ','ṗ'],
+    'q': ['q','զ'],
+    'r': ['r','ɾ','я','ř'],
+    's': ['s','ѕ','ṡ','ś'],
+    't': ['t','т','ŧ','ţ'],
+    'u': ['u','υ','ū','ú','ù','û'],
+    'v': ['v','ѵ','ṽ'],
+    'w': ['w','ѡ','ẁ','ẃ'],
+    'x': ['x','х','ẋ'],
+    'y': ['y','у','ý','ÿ'],
+    'z': ['z','ɀ','ž']
+}
+digit_pools = {d: [d, chr(0xFF10 + i)] for i, d in enumerate(DIGITS)}
+
+# --- Mapping helpers ---
+def transform_map(mapping):
+    def f(text):
+        out=[]
+        for ch in text:
+            if ch in mapping:
+                out.append(mapping[ch])
+            elif ch.lower() in mapping:
+                mapped = mapping[ch.lower()]
+                out.append(mapped.upper() if ch.isupper() else mapped)
+            else:
+                out.append(ch)
+        return "".join(out)
+    return f
+
+def spaced_text(text, gap=1): return (" " * gap).join(list(text))
+def alternate_case(text):
+    out=[]; toggle=False
+    for c in text:
+        if c.isalpha(): out.append(c.upper() if toggle else c.lower()); toggle=not toggle
+        else: out.append(c)
+    return "".join(out)
+
+def make_mixed_mapping(seed:int, variant_prob=0.78):
+    r=random.Random(seed)
+    mapping={}
+    for ch in ALPHABET_LO:
+        if r.random() < variant_prob:
+            pool = char_pools.get(ch, [ch])
+            chosen = r.choice(pool)
+            mapping[ch] = chosen
+            mapping[ch.upper()] = chosen.upper() if hasattr(chosen,"upper") else chosen
+        else:
+            mapping[ch] = ch; mapping[ch.upper()] = ch.upper()
+    for d in DIGITS: mapping[d] = r.choice(digit_pools.get(d,[d]))
+    return mapping
+
+def compose_font(seed):
+    r=random.Random(seed)
+    mapping = make_mixed_mapping(seed)
+    fn_map = transform_map(mapping)
+    effects=[fn_map]
+    if r.random()<0.25: effects.append(lambda t: alternate_case(t))
+    if r.random()<0.2: effects.append(lambda t: spaced_text(t,gap=random.choice([1,2])))
+    def font_fn(text):
+        t=text
+        for e in effects: t=e(t)
+        return t
+    return font_fn
+
+# --- Build fonts ---
+TEXT_FONTS=[]
+seen=set()
+for i in range(TARGET_FONTS):
+    f=compose_font(i)
+    TEXT_FONTS.append((str(i), f"Font{i}", f))
+
+# --- Symbol list ---
+SYMBOLS = ["•","‣","◦","○","●","◉","◎","◇","◆","✦","✧","✵","✶","✷","✸",
+            "✹","✺","✻","✼","✽","✾","❀","❁","❂","❃","❋","✯","✰","★","☆",
+            "✪","✫","✬","✭","✮","✯","✱","✲","✳","✴","✵","→","←","↑","↓"]
+symbol_FONTS=[(str(i),f"symbol{i}",ch) for i,ch in enumerate(SYMBOLS)]
+
+# --- Pagination & UI ---
+PENDING={}
+def short_token(): return uuid4().hex[:8]
+
+def build_keyboard(token,page,fonts,user_text,symbol_mode=False):
+    ids=[f[0] for f in fonts]
+    total_pages=math.ceil(len(ids)/PAGE_SIZE)
+    start,end=page*PAGE_SIZE,(page+1)*PAGE_SIZE
+    rows=[]
+    for fid in ids[start:end]:
+        entry=next(f for f in fonts if f[0]==fid)
+        label=entry[2](user_text) if not symbol_mode else entry[2]
+        if len(label)>35: label=label[:32]+"..."
+        cb=f"F|{token}|{fid}|{page}"
+        rows.append([InlineKeyboardButton(label,callback_data=cb)])
+    nav=[]
+    if page>0: nav.append(InlineKeyboardButton("⬅",callback_data=f"P|{token}|{page-1}"))
+    if end<len(ids): nav.append(InlineKeyboardButton("➡",callback_data=f"P|{token}|{page+1}"))
+    if nav: rows.append(nav)
+    rows.append([InlineKeyboardButton(f"📄 {page+1}/{total_pages}",callback_data="none")])
+    rows.append([InlineKeyboardButton("❌ Close",callback_data=f"C|{token}")])
+    return InlineKeyboardMarkup(rows)
+
+# --- Command handlers ---
+async def font_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args: return await update.message.reply_text("Usage: /font <text>")
+    text=" ".join(context.args)
+    token=short_token()
+    fonts={"items":TEXT_FONTS,"order":[f[0] for f in TEXT_FONTS]}
+    PENDING[token]={"text":text,"fonts":fonts}
+    kb=build_keyboard(token,0,TEXT_FONTS,text)
+    await update.message.reply_text("✨ Choose a font:",reply_markup=kb)
+
+async def symbol_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    token=short_token()
+    fonts={"items":symbol_FONTS,"order":[f[0] for f in symbol_FONTS]}
+    PENDING[token]={"text":"","fonts":fonts,"symbol":True}
+    kb=build_keyboard(token,0,symbol_FONTS,"",symbol_mode=True)
+    await update.message.reply_text("✴ Choose a symbol:",reply_markup=kb)
+
+async def font_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q=update.callback_query; await q.answer()
+    data=q.data.split("|")
+    if data[0]=="C": return await q.message.delete()
+    if data[0]=="P":
+        token,page=data[1],int(data[2])
+        s=PENDING.get(token)
+        if not s: return await q.answer("Expired.")
+        text=s["text"]; fonts=s["fonts"]["items"]; sym=s.get("symbol",False)
+        kb=build_keyboard(token,page,fonts,text,symbol_mode=sym)
+        await q.message.edit_reply_markup(reply_markup=kb)
+    elif data[0]=="F":
+        token,kid,page=data[1],data[2],int(data[3])
+        s=PENDING.get(token)
+        if not s: return await q.answer("Expired.")
+        fonts=s["fonts"]["items"]; sym=s.get("symbol",False)
+        entry=next(f for f in fonts if f[0]==kid)
+        if sym: await q.message.reply_text(entry[2])
+        else:
+            styled=entry[2](s["text"])
+            await q.message.reply_text(styled)
 
 
 
@@ -6098,6 +6270,10 @@ async def start_bots():
         application.add_handler(CommandHandler("movie", movie_command))
         application.add_handler(CallbackQueryHandler(movie_callback, pattern=r"^movie_"))
         application.add_handler(CommandHandler("ask", ask_command))
+        application.add_handler(CommandHandler("font", font_command))
+        application.add_handler(CommandHandler("symbol", symbol_command))
+        application.add_handler(CallbackQueryHandler(font_callback, pattern=r"^(F|P|C)\|"))
+
 
 
 
@@ -6146,6 +6322,5 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
