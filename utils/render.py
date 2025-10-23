@@ -210,12 +210,13 @@ async def send_quote_sticker(bot, chat_id, name, message, profile_image=None):
         name_color = get_telegram_name_color(user_id)
         
         await create_quote_image(
-            name,
+            getattr(name, "first_name", str(name)),
             message,
             profile_image,
             output_path,
             name_color=name_color
         )
+
 
 
         
@@ -236,5 +237,4 @@ async def send_quote_sticker(bot, chat_id, name, message, profile_image=None):
                 os.remove(output_path)
         except Exception as e:
             print(f"Error deleting temp file: {e}")
-
 
