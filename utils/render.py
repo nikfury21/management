@@ -78,9 +78,10 @@ HTML_TEMPLATE = """
 
     .name {
       font-size: 24px;
-      color: "{{ name_color }}";
+      color: {{ name_color | tojson }};
       line-height: 1.2;
     }
+
 
 
 
@@ -237,4 +238,3 @@ async def send_quote_sticker(bot, chat_id, name, message, profile_image=None):
                 os.remove(output_path)
         except Exception as e:
             print(f"Error deleting temp file: {e}")
-
