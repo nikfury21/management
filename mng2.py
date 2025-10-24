@@ -4935,6 +4935,12 @@ async def purge(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+import tempfile
+from PIL import Image
+from telegram import InputFile
+import os
+
+# ──────────────── /q (unchanged) ────────────────
 async def quote_command(update, context):
     message = update.message
     if not message or not message.reply_to_message:
@@ -4960,13 +4966,13 @@ async def quote_command(update, context):
             profile_image_path = os.path.join(temp_dir, f"{user.id}_profile.jpg")
             await file.download_to_drive(profile_image_path)
         else:
-            # User has no profile photo - generate placeholder
+            # No profile photo — placeholder
             initial = (user.first_name[0] if user.first_name else "U").upper()
             profile_image_path = os.path.join(temp_dir, f"{user.id}_placeholder.png")
             create_placeholder_avatar(profile_image_path, initial, user.id)
     except Exception as e:
-        print(f"Error fetching profile photo, generating placeholder: {e}")
-        initial = (user.first_name[0] if user.first_name else "U").upper()
+        print(f"Error fetching profile photo: {e}")
+        initial = (user.first_name[0] if user.first_name else 'U').upper()
         profile_image_path = os.path.join(temp_dir, f"{user.id}_placeholder.png")
         create_placeholder_avatar(profile_image_path, initial, user.id)
 
@@ -4985,7 +4991,7 @@ async def quote_command(update, context):
         img = Image.open(temp_png)
         img.save(temp_webp, "WEBP", lossless=True)
 
-        await wait_msg.delete()  # remove waiting message
+        await wait_msg.delete()
         with open(temp_webp, "rb") as sticker_file:
             await message.reply_sticker(sticker=InputFile(sticker_file))
 
@@ -4998,6 +5004,95 @@ async def quote_command(update, context):
             if p and os.path.exists(p):
                 os.remove(p)
 
+
+
+# ──────────────── /q r (quote + replied message) ────────────────
+async def quote_reply_command(update, context):
+    message = update.message
+    replied = message.reply_to_message
+
+    if not replied:
+        await message.reply_text("Please reply to someone's message and use /q r")
+        return
+
+    replied_user = replied.from_user
+    replied_text = replied.text or replied.caption or ""
+    my_user = message.from_user
+    my_text = message.text.replace("/q", "").replace("r", "", 1).strip()
+
+    if not replied_text and not my_text:
+        await message.reply_text("Nothing to quote.")
+        return
+
+    temp_dir = "temp"
+    os.makedirs(temp_dir, exist_ok=True)
+
+    async def get_pfp(user):
+        try:
+            photos = await context.bot.get_user_profile_photos(user.id)
+            if photos.total_count > 0:
+                file = await context.bot.get_file(photos.photos[0][-1].file_id)
+                path = os.path.join(temp_dir, f"{user.id}_profile.jpg")
+                await file.download_to_drive(path)
+                return path
+        except Exception:
+            pass
+        # Fallback placeholder
+        initial = (user.first_name[0] if user.first_name else "U").upper()
+        path = os.path.join(temp_dir, f"{user.id}_placeholder.png")
+        create_placeholder_avatar(path, initial, user.id)
+        return path
+
+    top_pfp = await get_pfp(replied_user)
+    bottom_pfp = await get_pfp(my_user)
+
+    temp_combined = tempfile.mktemp(suffix=".png")
+    temp_webp = tempfile.mktemp(suffix=".webp")
+
+    try:
+        wait_msg = await message.reply_text("✨ Creating dual quote...")
+
+        # Create both single-quote stickers and stack them vertically
+        from PIL import Image
+        temp1 = tempfile.mktemp(suffix=".png")
+        temp2 = tempfile.mktemp(suffix=".png")
+
+        await create_quote_image(
+            name=replied_user.first_name or "User",
+            message=replied_text,
+            profile_image=top_pfp,
+            output_path=temp1,
+        )
+        await create_quote_image(
+            name=my_user.first_name or "User",
+            message=my_text or "...",
+            profile_image=bottom_pfp,
+            output_path=temp2,
+        )
+
+        img1 = Image.open(temp1).convert("RGBA")
+        img2 = Image.open(temp2).convert("RGBA")
+
+        width = max(img1.width, img2.width)
+        combined = Image.new("RGBA", (width, img1.height + img2.height + 20), (0, 0, 0, 0))
+        combined.paste(img1, (0, 0))
+        combined.paste(img2, (0, img1.height + 20))
+        combined.save(temp_combined, "PNG")
+
+        img = Image.open(temp_combined)
+        img.save(temp_webp, "WEBP", lossless=True)
+
+        await wait_msg.delete()
+        with open(temp_webp, "rb") as f:
+            await message.reply_sticker(sticker=InputFile(f))
+
+    except Exception as e:
+        print(f"[❌] Error in /q r: {e}")
+        await message.reply_text("❌ Failed to create dual quote.")
+    finally:
+        for p in [top_pfp, bottom_pfp, temp_combined, temp_webp, temp1, temp2]:
+            if p and os.path.exists(p):
+                os.remove(p)
 
 
 def create_initial_avatar(path, initial):
@@ -6225,6 +6320,7 @@ async def start_bots():
         application.add_handler(MessageHandler(ptb_filters.TEXT & ~ptb_filters.COMMAND, filter_trigger_handler))
         application.add_handler(CommandHandler("anime", anime_command))
         application.add_handler(CommandHandler("q", quote_command))
+        application.add_handler(CommandHandler("qr", quote_reply_command))
         application.add_handler(CommandHandler("lock", lock_command))
         application.add_handler(CommandHandler("unlock", unlock_command))
         application.add_handler(CommandHandler("locks", locks_command))
@@ -6322,5 +6418,4 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
