@@ -2478,6 +2478,24 @@ def lexica_search(query, count=5):
         logging.warning(f"Lexica search failed: {e}")
         return []
 
+
+def download_and_prepare_image(url: str, timeout: int = 10):
+    """Download and re-encode an image to valid JPEG bytes (avoids 'image_process_failed')."""
+    try:
+        r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        img = Image.open(BytesIO(r.content)).convert("RGB")
+        bio = BytesIO()
+        img.save(bio, format="JPEG")
+        bio.name = "image.jpg"
+        bio.seek(0)
+        return bio
+    except Exception as e:
+        print(f"[Image Download Fail] {e}")
+        return None
+
+
+
 async def find_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Usage: /find [number] <query> — sends images to user's DM"""
     user = update.effective_user
@@ -3516,6 +3534,42 @@ def mark_key_as_exhausted(key):
     key_status[key] = False
     print(f"⚠️ Perplexity key exhausted: {key}")
 
+async def extract_image_subject(query: str) -> str:
+    """Use Perplexity to extract the correct image subject (e.g., 'Vivo T3 smartphone')."""
+    import aiohttp
+    try:
+        key = await get_next_key()
+        if not key:
+            return None
+
+        prompt = (
+            "From the following text, extract only the subject someone would want a photo of. "
+            "Reply in 1–5 words only, no punctuation, no commentary.\n\n"
+            f"Text: {query}"
+        )
+
+        url = "https://api.perplexity.ai/chat/completions"
+        payload = {
+            "model": "sonar",
+            "messages": [
+                {"role": "system", "content": "You extract short keywords for image search."},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 15,
+        }
+        headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                data = await resp.json()
+                subject = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                if subject:
+                    subject = " ".join(subject.split()[:5])
+                return subject or None
+    except Exception as e:
+        print(f"[extract_image_subject] {e}")
+        return None
+
 # --- System Prompt (Custom personality) ---
 SYSTEM_PROMPT = (
     "You are a chatting assistant and reply in a friendly and sometimes savage tone. "
@@ -3545,6 +3599,8 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = " ".join(context.args).strip()
     await update.message.chat.send_action("typing")
+    need_image = bool(re.search(r"\b(image|photo|picture|pic|img)\b", query, re.IGNORECASE))
+
 
     url = "https://api.perplexity.ai/chat/completions"
     payload = {
@@ -3593,6 +3649,34 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         reply = re.sub(r"(?:^|\n)>", r"\n> ", reply)     # blockquotes
                         reply = re.sub(r"(##+ .+)", r"\n\n\1\n", reply)  # markdown headings
                         reply = re.sub(r"\n{3,}", "\n\n", reply).strip()
+                        # --- IMAGE HANDLING (only if user asked for a picture) ---
+                        if need_image:
+                            try:
+                                # 1️⃣ Extract the correct subject for the image
+                                subject = await extract_image_subject(query)
+                            except Exception:
+                                subject = None
+
+                            search_term = subject or query
+
+                            # 2️⃣ Try Google, fallback Lexica
+                            results = google_image_search(search_term, count=5)
+                            if not results:
+                                results = lexica_search(search_term, count=5)
+                            if not results:
+                                results = lexica_search(query, count=5)
+
+                            # 3️⃣ Download + send first valid image
+                            if results:
+                                for url in results:
+                                    img = download_and_prepare_image(url)
+                                    if img:
+                                        try:
+                                            await update.message.reply_photo(photo=img)
+                                            break
+                                        except Exception as e:
+                                            print(f"[Image Send Fail] {e}")
+
 
                         await update.message.reply_text(
                             format_response(reply),
@@ -6418,4 +6502,3 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
