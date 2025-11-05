@@ -252,28 +252,29 @@ def scrape_device_specifications(query: str):
         return None
 # --- FLUX.1-dev (Black Forest Labs) High-Quality Image Generator ---
 
-MODEL_CANDIDATES = ["black-forest-labs/FLUX.1-dev"]  # Force Flux only (no switching)
-POLLINATIONS_FALLBACK = True  # optional fallback if HF totally fails
+# === FLUX.1-dev Only Image Generation ===
+
+MODEL_CANDIDATES = ["black-forest-labs/FLUX.1-dev"]  # Always use FLUX.1-dev
+POLLINATIONS_FALLBACK = False  # disable fallback completely
 
 HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 ROUTER_BASE = "https://router.huggingface.co/hf-inference/models/"
 
+
 def hf_request(model_id: str, prompt: str, timeout=180):
     """
-    Improved request for black-forest-labs/FLUX.1-dev.
+    Request helper for Hugging Face FLUX.1-dev model.
     Returns (ok, is_image, content_or_text, status_code).
     """
     url = ROUTER_BASE + model_id
-
-    # Core generation parameters — tuned for cinematic accuracy
     payload = {
         "inputs": prompt,
         "options": {"wait_for_model": True},
         "parameters": {
             "width": 1024,
             "height": 1024,
-            "num_inference_steps": 40,
-            "guidance_scale": 7.5,
+            "num_inference_steps": 50,
+            "guidance_scale": 8.5,
             "negative_prompt": (
                 "blurry, low quality, distorted, deformed, watermark, text, "
                 "cropped, bad anatomy, out of frame, ugly, disfigured, lowres, "
@@ -291,28 +292,29 @@ def hf_request(model_id: str, prompt: str, timeout=180):
     if resp.status_code == 200 and content_type.startswith("image"):
         return True, True, resp.content, resp.status_code
 
-    # sometimes HF returns a JSON error
+    # Return textual error if not an image
     try:
         txt = resp.text
-    except:
+    except Exception:
         txt = "<no-text-response>"
     return True, False, txt, resp.status_code
 
 
 async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    /img command — always generates using FLUX.1-dev.
+    /generate or /img — Always uses black-forest-labs/FLUX.1-dev
     """
     if not context.args:
         await update.message.reply_text("Usage: /img <prompt>")
         return
 
     prompt = " ".join(context.args)
-    status_msg = await update.message.reply_text("🎨 Generating image... please wait (≈1–2 min)")
+    status_msg = await update.message.reply_text("🎨 Generating image with FLUX.1-dev... please wait (≈1–2 min)")
 
-    # Retry Flux a few times for reliability
-    for attempt in range(3):
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
         ok, is_image, content, status = hf_request("black-forest-labs/FLUX.1-dev", prompt)
+
         if ok and is_image:
             bio = BytesIO(content)
             bio.name = "flux_image.png"
@@ -320,23 +322,12 @@ async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_photo(photo=bio, caption=f"Prompt: {prompt}")
             await status_msg.delete()
             return
-        else:
-            print(f"[Flux] Attempt {attempt+1} failed — status={status}, resp={content[:200] if isinstance(content, str) else 'binary'}")
-            await asyncio.sleep(5)  # wait before retry
 
-    # Optional fallback if all Flux attempts fail
-    if POLLINATIONS_FALLBACK:
-        try:
-            poll_url = "https://image.pollinations.ai/prompt/" + requests.utils.quote(prompt)
-            r = requests.get(poll_url, timeout=60)
-            if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
-                await update.message.reply_photo(photo=r.content, caption=f"Prompt: {prompt}")
-                await status_msg.delete()
-                return
-        except Exception as e:
-            print(f"[Pollinations] Fallback failed: {e}")
+        print(f"[Flux] Attempt {attempt} failed — status={status}, resp={str(content)[:200]}")
+        await asyncio.sleep(5)
 
-    await status_msg.edit_text("❌failed to generate an image after several attempts.")
+    # If all retries fail
+    await status_msg.edit_text("❌ FLUX.1-dev failed to generate the image after multiple attempts.")
 
 
 def scrape_91mobiles_specs(query: str):
@@ -6604,6 +6595,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
