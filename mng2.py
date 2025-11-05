@@ -968,11 +968,12 @@ async def zombies(client, message):
 
 # === Stone Paper Scissors Game ===
 import asyncio, random
+from pyrogram.enums import ParseMode
 
 rps_games = {}
 
 def rps_mention(uid, name):
-    return f'<a href="tg://user?id={uid}">{name}</a>'
+    return f"[{name}](tg://user?id={uid})"
 
 def rps_result(c1, c2):
     if c1 == c2:
@@ -1043,9 +1044,9 @@ async def rps_start(client, message):
 
     sent = await client.send_message(
         chat_id,
-        "<b><i>Choose your game type:</i></b>",
+        "***Choose your game type:***",
         reply_markup=rps_main_menu(game_key),
-        parse_mode="html"
+        parse_mode=ParseMode.MARKDOWN
     )
     rps_games[game_key]["msg_id"] = sent.id
 
@@ -1059,9 +1060,9 @@ async def rps_modebot_menu(client, query):
         return
     game["type"] = "bot"
     await query.message.edit_text(
-        "<i>Select your round mode:</i>",
+        "_Select your round mode:_",
         reply_markup=rps_mode_keyboard(game_key, "bot"),
-        parse_mode="html"
+        parse_mode=ParseMode.MARKDOWN
     )
 
 @pyro_client.on_callback_query(pyro_filters.regex("^rps:modeplayer:"))
@@ -1072,9 +1073,9 @@ async def rps_modeplayer_menu(client, query):
         return
     game["type"] = "player"
     await query.message.edit_text(
-        "<i>Select your game mode:</i>",
+        "_Select your game mode:_",
         reply_markup=rps_mode_keyboard(game_key, "player"),
-        parse_mode="html"
+        parse_mode=ParseMode.MARKDOWN
     )
 
 
@@ -1092,8 +1093,8 @@ async def rps_start_botgame(client, query):
 
     for i in range(5, 0, -1):
         await query.message.edit_text(
-            f"<b><i>Bot is ready!</i></b><br><i>Game starts in</i> <b>{i}</b>…",
-            parse_mode="html"
+            f"***Bot is ready!***\n_Game starts in_ **{i}**…",
+            parse_mode=ParseMode.MARKDOWN
         )
         await asyncio.sleep(1)
 
@@ -1112,8 +1113,8 @@ async def rps_prepare_playergame(client, query):
 
     host = rps_mention(game["host_id"], game["host_name"])
     join_btn = rps_join_keyboard(game_key)
-    txt = f"<b>Game created by</b> {host}<br><br><b>Players:</b><br>1) {host}<br>2) <i>Waiting...</i><br><br><i>Invite someone to join by pressing Join Game</i>"
-    await query.message.edit_text(txt, reply_markup=join_btn, parse_mode="html")
+    txt = f"**Game created by** {host}\n\n**Players:**\n1) {host}\n2) _Waiting..._\n\n_Invite someone to join by pressing Join Game_"
+    await query.message.edit_text(txt, reply_markup=join_btn, parse_mode=ParseMode.MARKDOWN)
 
 
 @pyro_client.on_callback_query(pyro_filters.regex("^rps:join:"))
@@ -1135,8 +1136,8 @@ async def rps_join_game(client, query):
 
     for i in range(5, 0, -1):
         await query.message.edit_text(
-            f"<i>Game starting in</i> <b>{i}</b>…<br><br><b>Players:</b><br>1) {host}<br>2) {p2}",
-            parse_mode="html"
+            f"_Game starting in_ **{i}**…\n\n**Players:**\n1) {host}\n2) {p2}",
+            parse_mode=ParseMode.MARKDOWN
         )
         await asyncio.sleep(1)
 
@@ -1151,20 +1152,20 @@ async def rps_start_round(client, game_key):
 
     game["choices"] = {}
     host = rps_mention(game["host_id"], game["host_name"])
-    p2 = rps_mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "<b><i>Bot</i></b>"
+    p2 = rps_mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "***Bot***"
 
     text = (
-        f"<b>Round Starting!</b><br><br>"
-        f"<b>Scores:</b> <code>{game['scores']['p1']} - {game['scores']['p2']}</code><br><br>"
-        f"<b>Players:</b><br>1) {host}<br>2) {p2}<br><br>"
-        f"<i>Make your choice below!</i>"
+        f"**Round Starting!**\n\n"
+        f"**Scores:** `{game['scores']['p1']} - {game['scores']['p2']}`\n\n"
+        f"**Players:**\n1) {host}\n2) {p2}\n\n"
+        f"_Make your choice below!_"
     )
     await client.edit_message_text(
         game["chat_id"],
         game["msg_id"],
         text,
         reply_markup=rps_choice_keyboard(game_key),
-        parse_mode="html"
+        parse_mode=ParseMode.MARKDOWN
     )
 
 
@@ -1207,24 +1208,24 @@ async def rps_choice(client, query):
         res = rps_result(c1, c2)
 
         host = rps_mention(game["host_id"], game["host_name"])
-        p2 = rps_mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "<b><i>Bot</i></b>"
+        p2 = rps_mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "***Bot***"
 
         txt = (
-            f"{host} <i>played</i> <b>{c1.capitalize()}</b><br>"
-            f"{p2} <i>played</i> <b>{c2.capitalize()}</b><br><br>"
+            f"{host} _played_ **{c1.capitalize()}**\n"
+            f"{p2} _played_ **{c2.capitalize()}**\n\n"
         )
 
         if res == "draw":
-            txt += "<b><i>It's a draw!</i></b>"
+            txt += "***It's a draw!***"
         elif res == "p1":
             game["scores"]["p1"] += 1
-            txt += f"<b><i>{host} wins this round!</i></b>"
+            txt += f"***{host} wins this round!***"
         else:
             game["scores"]["p2"] += 1
-            txt += f"<b><i>{p2} wins this round!</i></b>"
+            txt += f"***{p2} wins this round!***"
 
         await client.edit_message_text(
-            game["chat_id"], game["msg_id"], txt, parse_mode="html"
+            game["chat_id"], game["msg_id"], txt, parse_mode=ParseMode.MARKDOWN
         )
         await asyncio.sleep(3)
 
@@ -1232,15 +1233,15 @@ async def rps_choice(client, query):
         if game["scores"]["p1"] >= target:
             await client.edit_message_text(
                 game["chat_id"], game["msg_id"],
-                f"<b><i>{host}</i></b> <i>wins the game!</i><br><br><b>Final Score:</b> <code>{game['scores']['p1']} - {game['scores']['p2']}</code>",
-                parse_mode="html"
+                f"***{host}*** _wins the game!_\n\n**Final Score:** `{game['scores']['p1']} - {game['scores']['p2']}`",
+                parse_mode=ParseMode.MARKDOWN
             )
             del rps_games[game_key]
         elif game["scores"]["p2"] >= target:
             await client.edit_message_text(
                 game["chat_id"], game["msg_id"],
-                f"<b><i>{p2}</i></b> <i>wins the game!</i><br><br><b>Final Score:</b> <code>{game['scores']['p1']} - {game['scores']['p2']}</code>",
-                parse_mode="html"
+                f"***{p2}*** _wins the game!_\n\n**Final Score:** `{game['scores']['p1']} - {game['scores']['p2']}`",
+                parse_mode=ParseMode.MARKDOWN
             )
             del rps_games[game_key]
         else:
