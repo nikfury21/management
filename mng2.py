@@ -250,11 +250,8 @@ def scrape_device_specifications(query: str):
     except Exception as e:
         print(f"[DeviceSpecifications error] {e}")
         return None
-# --- FLUX.1-dev (Black Forest Labs) High-Quality Image Generator ---
 
-# === FLUX.1-dev Only Image Generation ===
-
-MODEL_CANDIDATES = ["black-forest-labs/FLUX.1-dev"]  # Always use FLUX.1-dev
+MODEL_CANDIDATES = ["black-forest-labs/FLUX.1-dev", "stabilityai/stable-diffusion-xl-base-1.0"]
 POLLINATIONS_FALLBACK = False  # disable fallback completely
 
 HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
@@ -263,7 +260,7 @@ ROUTER_BASE = "https://router.huggingface.co/hf-inference/models/"
 
 def hf_request(model_id: str, prompt: str, timeout=180):
     """
-    Request helper for Hugging Face FLUX.1-dev model.
+    Request helper for Hugging Face image models.
     Returns (ok, is_image, content_or_text, status_code).
     """
     url = ROUTER_BASE + model_id
@@ -292,7 +289,6 @@ def hf_request(model_id: str, prompt: str, timeout=180):
     if resp.status_code == 200 and content_type.startswith("image"):
         return True, True, resp.content, resp.status_code
 
-    # Return textual error if not an image
     try:
         txt = resp.text
     except Exception:
@@ -302,32 +298,42 @@ def hf_request(model_id: str, prompt: str, timeout=180):
 
 async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    /generate or /img — Always uses black-forest-labs/FLUX.1-dev
+    /generate — produces two images using different models (kept hidden)
     """
     if not context.args:
-        await update.message.reply_text("Usage: /img <prompt>")
+        await update.message.reply_text("Usage: /generate <prompt>")
         return
 
     prompt = " ".join(context.args)
-    status_msg = await update.message.reply_text("🎨 Generating image... please wait (≈1–2 min)")
+    status_msg = await update.message.reply_text("🎨 Generating images... please wait (≈1–2 min)")
 
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        ok, is_image, content, status = hf_request("black-forest-labs/FLUX.1-dev", prompt)
-
+    async def get_image(model_id):
+        ok, is_image, content, status = hf_request(model_id, prompt)
         if ok and is_image:
-            bio = BytesIO(content)
-            bio.name = "flux_image.png"
-            bio.seek(0)
-            await update.message.reply_photo(photo=bio, caption=f"Prompt: {prompt}")
-            await status_msg.delete()
-            return
+            return content
+        print(f"[{model_id}] failed: {status} {str(content)[:100]}")
+        return None
 
-        print(f"[Flux] Attempt {attempt} failed — status={status}, resp={str(content)[:200]}")
-        await asyncio.sleep(5)
+    # Run both models in parallel
+    tasks = [asyncio.create_task(get_image(mid)) for mid in MODEL_CANDIDATES]
+    results = await asyncio.gather(*tasks)
 
-    # If all retries fail
-    await status_msg.edit_text("failed to generate the image after multiple attempts.")
+    images = [img for img in results if img]
+    if not images:
+        await status_msg.edit_text("⚠️ Failed to generate the images after multiple attempts.")
+        return
+
+    # Prepare album (multiple photos in one message)
+    from telegram import InputMediaPhoto
+    media_group = []
+    for idx, img in enumerate(images):
+        bio = BytesIO(img)
+        bio.name = f"image_{idx+1}.png"
+        bio.seek(0)
+        media_group.append(InputMediaPhoto(media=bio, caption=f"{prompt}" if idx == 0 else None))
+
+    await update.message.reply_media_group(media_group)
+    await status_msg.delete()
 
 
 def scrape_91mobiles_specs(query: str):
@@ -6595,7 +6601,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
