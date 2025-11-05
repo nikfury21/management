@@ -138,6 +138,8 @@ BOT_TOKEN = os.getenv("MNG_BOT_TOKEN")
 GOOGLE_KEY = os.environ.get("GOOGLE_KEY")
 GOOGLE_CX  = os.environ.get("GOOGLE_CX")
 OMDB_API_KEY = os.environ.get("OMDB_KEY")
+HF_TOKEN = os.environ.get("HF_TOKEN")
+
 
 pyro_client = PyroClient(
     "pic_bot",
@@ -248,6 +250,93 @@ def scrape_device_specifications(query: str):
     except Exception as e:
         print(f"[DeviceSpecifications error] {e}")
         return None
+MODEL_CANDIDATES = [
+    "black-forest-labs/FLUX.1-dev",            # top-quality (if available)
+    "stabilityai/sdxl-turbo",                  # fast SDXL turbo
+    "stabilityai/stable-diffusion-3-medium",   # another strong option
+    "stabilityai/stable-diffusion-xl-base-1.0"  # fallback SDXL base
+]
+
+POLLINATIONS_FALLBACK = True  # fallback to Pollinations if HF fails
+
+HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
+ROUTER_BASE = "https://router.huggingface.co/hf-inference/models/"
+
+
+def hf_request(model_id: str, prompt: str, timeout=60):
+    """
+    Send request to router. Returns tuple (ok, is_image, content_or_text, status_code).
+    - ok: boolean (request returned something)
+    - is_image: True if response Content-Type is image/*
+    - content_or_text: bytes if image else str (error json/text)
+    """
+    url = ROUTER_BASE + model_id
+    payload = {
+        "inputs": prompt,
+        # options wait_for_model helps if model needs loading
+        "options": {"wait_for_model": True},
+        # you can add "parameters": {"width": 1024, "height": 1024, "num_inference_steps": 20} if model supports it
+    }
+    try:
+        resp = requests.post(url, headers=HEADERS, json=payload, timeout=timeout)
+    except Exception as e:
+        return False, False, f"Request failed: {e}", None
+
+    content_type = resp.headers.get("Content-Type", "")
+    if resp.status_code == 200 and content_type.startswith("image"):
+        return True, True, resp.content, resp.status_code
+
+    # sometimes HF returns JSON with base64 or error text
+    try:
+        txt = resp.text
+    except:
+        txt = "<no-text-response>"
+    return True, False, txt, resp.status_code
+
+async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /img <prompt>")
+        return
+
+    prompt = " ".join(context.args)
+    await update.message.reply_text("Generating image... trying best available models (this may take a few seconds)")
+
+    # try each model in order
+    last_error = None
+    for model in MODEL_CANDIDATES:
+        ok, is_image, content, status = hf_request(model, prompt)
+        if not ok:
+            last_error = f"{model}: request failed ({content})"
+            continue
+
+        if is_image:
+            bio = BytesIO(content)
+            bio.name = "image.png"
+            bio.seek(0)
+            await update.message.reply_photo(photo=bio, caption=f"Prompt: {prompt}\nModel: {model}")
+            return
+
+        # Not an image => examine message and continue to next model
+        # Save last error to show user if everything fails
+        last_error = f"{model} returned status {status}: {content}"
+        # If Not Found (404) — try next
+        if status == 404 or "Not Found" in str(content):
+            continue
+        # If HF returned a transient error, also try next
+        continue
+
+    # If all HF models failed, optionally fallback to Pollinations (free)
+    if POLLINATIONS_FALLBACK:
+        try:
+            poll_url = "https://image.pollinations.ai/prompt/" + requests.utils.quote(prompt)
+            r = requests.get(poll_url, timeout=60)
+            if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
+                await update.message.reply_photo(photo=r.content, caption=f" Prompt: {prompt}\nModel: Pollinations (fallback)")
+                return
+        except Exception as e:
+            last_error = (last_error or "") + f"\nPollinations fallback failed: {e}"
+
+    await update.message.reply_text("All models failed. Last error:\n" + (last_error or "unknown error"))
 
 
 def scrape_91mobiles_specs(query: str):
@@ -6453,6 +6542,8 @@ async def start_bots():
         application.add_handler(CommandHandler("font", font_command))
         application.add_handler(CommandHandler("symbol", symbol_command))
         application.add_handler(CallbackQueryHandler(font_callback, pattern=r"^(F|P|C)\|"))
+        application.add_handler(CommandHandler("generate", generate))
+
 
 
 
@@ -6502,3 +6593,4 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
