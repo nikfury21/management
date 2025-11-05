@@ -5509,32 +5509,43 @@ async def pp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await message.reply_text("🔍 Analyzing image...")
 
-    # Get the Gemini description
-    description = await describe_image(file_path)
+    # --- Describe the image with Gemini (with key rotation) ---
+    global gemini_model
 
-    # Clean and escape description for safe Markdown rendering
+    try:
+        from PIL import Image
+        image = Image.open(file_path)
+        prompt = ["Describe this image clearly and briefly:", image]
+
+        # Use safe_generate (from mng2.py) to auto-rotate keys
+        response = safe_generate(gemini_model, prompt)
+        description = response.text if response else "Unable to describe the image."
+    except Exception as e:
+        print(f"[pp_command] Gemini error: {e}")
+        try:
+            # Rotate to next Gemini key and retry once
+            gemini_model = get_next_gemini_model()
+            response = safe_generate(gemini_model, prompt)
+            description = response.text if response else "Unable to describe the image."
+        except Exception as e2:
+            print(f"[pp_command] Retry failed: {e2}")
+            description = "❌ Failed to analyze image."
+
+    # --- Format and send result ---
     clean_description = " ".join(description.split())
     safe_description = boldify(clean_description)
 
-
-
-
-    # Prepare Google search link
     search_query = quote_plus(clean_description)
-
     buttons = InlineKeyboardMarkup(
         [[InlineKeyboardButton("🔎 Google Search", url=f"https://www.google.com/search?q={search_query}")]]
     )
 
-    # Send formatted message with Markdown parsing
     await message.reply_text(
         f"Looks like:\n{safe_description}",
         reply_markup=buttons,
         parse_mode=ParseMode.HTML
-
     )
 
-    # Clean up downloaded file
     os.remove(file_path)
 
 
@@ -6590,5 +6601,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
