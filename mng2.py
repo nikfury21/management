@@ -309,7 +309,7 @@ async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     prompt = " ".join(context.args)
-    status_msg = await update.message.reply_text("🎨 Generating image with FLUX.1-dev... please wait (≈1–2 min)")
+    status_msg = await update.message.reply_text("🎨 Generating image... please wait (≈1–2 min)")
 
     max_retries = 3
     for attempt in range(1, max_retries + 1):
@@ -327,7 +327,7 @@ async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await asyncio.sleep(5)
 
     # If all retries fail
-    await status_msg.edit_text("❌ FLUX.1-dev failed to generate the image after multiple attempts.")
+    await status_msg.edit_text("failed to generate the image after multiple attempts.")
 
 
 def scrape_91mobiles_specs(query: str):
@@ -6595,6 +6595,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
