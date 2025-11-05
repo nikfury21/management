@@ -966,6 +966,157 @@ async def zombies(client, message):
     await message.reply_text(f"Deleted accounts: {ids_str}\nTotal: {len(deleted_ids)}")
 
 
+# === Stone Paper Scissors Game ===
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+import asyncio
+
+rps_games = {}
+
+def rps_mention(uid, name):
+    return f"[{name}](tg://user?id={uid})"
+
+def rps_result(c1, c2):
+    if c1 == c2:
+        return "draw"
+    if (c1 == "stone" and c2 == "scissor") or \
+       (c1 == "paper" and c2 == "stone") or \
+       (c1 == "scissor" and c2 == "paper"):
+        return "p1"
+    return "p2"
+
+def rps_choice_markup():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🪨 Stone", callback_data="rps:stone"),
+         InlineKeyboardButton("📄 Paper", callback_data="rps:paper"),
+         InlineKeyboardButton("✂️ Scissor", callback_data="rps:scissor")]
+    ])
+
+@pyro_client.on_message(pyro_filters.command("rps"))
+async def rps_play(client, message):
+    chat_id = message.chat.id
+    rps_games[chat_id] = {
+        "host_id": message.from_user.id,
+        "host_name": message.from_user.first_name,
+        "player2_id": None,
+        "player2_name": None,
+        "mode": None,
+        "scores": {"p1": 0, "p2": 0},
+        "choices": {},
+        "msg_id": None
+    }
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Best of 3", callback_data="rps:mode_3"),
+         InlineKeyboardButton("Best of 5", callback_data="rps:mode_5")]
+    ])
+    sent = await message.reply_text("Choose a game mode:", reply_markup=keyboard)
+    rps_games[chat_id]["msg_id"] = sent.id
+
+@pyro_client.on_callback_query(pyro_filters.regex("^rps:mode_"))
+async def rps_mode_select(client, query: CallbackQuery):
+    chat_id = query.message.chat.id
+    game = rps_games.get(chat_id)
+    if not game:
+        return await query.answer("No active game!", show_alert=True)
+
+    game["mode"] = int(query.data.split("_")[1])
+    host = rps_mention(game["host_id"], game["host_name"])
+    join_btn = InlineKeyboardMarkup([[InlineKeyboardButton("Join", callback_data="rps:join")]])
+    text = f"Game created by {host}\n\nClick join to join the game\n\nPlayers:\n1️⃣ {host}\n2️⃣ Waiting..."
+    await query.message.edit_text(text, reply_markup=join_btn, disable_web_page_preview=True)
+
+@pyro_client.on_callback_query(pyro_filters.regex("^rps:join$"))
+async def rps_join_game(client, query: CallbackQuery):
+    chat_id = query.message.chat.id
+    game = rps_games.get(chat_id)
+    if not game:
+        return await query.answer("No active game!", show_alert=True)
+    if query.from_user.id == game["host_id"]:
+        return await query.answer("You are already the host!", show_alert=True)
+    if game["player2_id"]:
+        return await query.answer("Someone already joined!", show_alert=True)
+
+    game["player2_id"] = query.from_user.id
+    game["player2_name"] = query.from_user.first_name
+
+    host = rps_mention(game["host_id"], game["host_name"])
+    p2 = rps_mention(game["player2_id"], game["player2_name"])
+
+    for i in range(5, 0, -1):
+        await query.message.edit_text(f"🎮 Game starting in {i}...\n\nPlayers:\n1️⃣ {host}\n2️⃣ {p2}", disable_web_page_preview=True)
+        await asyncio.sleep(1)
+
+    await rps_start_round(client, chat_id)
+
+async def rps_start_round(client, chat_id):
+    game = rps_games[chat_id]
+    game["choices"] = {}
+
+    host = rps_mention(game["host_id"], game["host_name"])
+    p2 = rps_mention(game["player2_id"], game["player2_name"])
+
+    text = (f"🏁 Round starting!\n\n"
+            f"Scores: {game['scores']['p1']} - {game['scores']['p2']}\n\n"
+            f"Players:\n1️⃣ {host}\n2️⃣ {p2}\n\nChoose your move 👇")
+
+    await client.edit_message_text(chat_id, game["msg_id"], text,
+                                   reply_markup=rps_choice_markup(),
+                                   disable_web_page_preview=True)
+
+@pyro_client.on_callback_query(pyro_filters.regex("^rps:(stone|paper|scissor)$"))
+async def rps_choice(client, query: CallbackQuery):
+    chat_id = query.message.chat.id
+    user_id = query.from_user.id
+    game = rps_games.get(chat_id)
+    if not game:
+        return await query.answer("No active game!", show_alert=True)
+    if user_id not in [game["host_id"], game["player2_id"]]:
+        return await query.answer("You're not in this game!", show_alert=True)
+
+    player = "p1" if user_id == game["host_id"] else "p2"
+    if player in game["choices"]:
+        return await query.answer("You already picked!", show_alert=True)
+
+    game["choices"][player] = query.data.split(":")[1]
+    await query.answer(f"You chose {query.data.split(':')[1].capitalize()} ✅")
+
+    if len(game["choices"]) == 2:
+        c1, c2 = game["choices"]["p1"], game["choices"]["p2"]
+        res = rps_result(c1, c2)
+
+        host = rps_mention(game["host_id"], game["host_name"])
+        p2 = rps_mention(game["player2_id"], game["player2_name"])
+
+        txt = (f"{host} played *{c1.capitalize()}*\n"
+               f"{p2} played *{c2.capitalize()}*\n\n")
+
+        if res == "draw":
+            txt += "🤝 It's a draw!"
+        elif res == "p1":
+            game["scores"]["p1"] += 1
+            txt += f"🏆 {host} wins this round!"
+        else:
+            game["scores"]["p2"] += 1
+            txt += f"🏆 {p2} wins this round!"
+
+        await client.edit_message_text(chat_id, game["msg_id"], txt, disable_web_page_preview=True)
+        await asyncio.sleep(3)
+
+        target = game["mode"] // 2 + 1
+        if game["scores"]["p1"] >= target:
+            await client.edit_message_text(chat_id, game["msg_id"],
+                f"🎉 {host} wins the game!\n\nFinal Score: {game['scores']['p1']} - {game['scores']['p2']}",
+                disable_web_page_preview=True)
+            del rps_games[chat_id]
+        elif game["scores"]["p2"] >= target:
+            await client.edit_message_text(chat_id, game["msg_id"],
+                f"🎉 {p2} wins the game!\n\nFinal Score: {game['scores']['p1']} - {game['scores']['p2']}",
+                disable_web_page_preview=True)
+            del rps_games[chat_id]
+        else:
+            await rps_start_round(client, chat_id)
+
+
+
 @pyro_client.on_message(pyro_filters.command("rzombies"))
 async def rzombies(client, message):
     # Admin-only
@@ -6601,7 +6752,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
