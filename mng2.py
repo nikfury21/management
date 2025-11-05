@@ -250,33 +250,38 @@ def scrape_device_specifications(query: str):
     except Exception as e:
         print(f"[DeviceSpecifications error] {e}")
         return None
-MODEL_CANDIDATES = [
-    "black-forest-labs/FLUX.1-dev",            # top-quality (if available)
-    "stabilityai/sdxl-turbo",                  # fast SDXL turbo
-    "stabilityai/stable-diffusion-3-medium",   # another strong option
-    "stabilityai/stable-diffusion-xl-base-1.0"  # fallback SDXL base
-]
+# --- FLUX.1-dev (Black Forest Labs) High-Quality Image Generator ---
 
-POLLINATIONS_FALLBACK = True  # fallback to Pollinations if HF fails
+MODEL_CANDIDATES = ["black-forest-labs/FLUX.1-dev"]  # Force Flux only (no switching)
+POLLINATIONS_FALLBACK = True  # optional fallback if HF totally fails
 
 HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 ROUTER_BASE = "https://router.huggingface.co/hf-inference/models/"
 
-
-def hf_request(model_id: str, prompt: str, timeout=60):
+def hf_request(model_id: str, prompt: str, timeout=180):
     """
-    Send request to router. Returns tuple (ok, is_image, content_or_text, status_code).
-    - ok: boolean (request returned something)
-    - is_image: True if response Content-Type is image/*
-    - content_or_text: bytes if image else str (error json/text)
+    Improved request for black-forest-labs/FLUX.1-dev.
+    Returns (ok, is_image, content_or_text, status_code).
     """
     url = ROUTER_BASE + model_id
+
+    # Core generation parameters — tuned for cinematic accuracy
     payload = {
         "inputs": prompt,
-        # options wait_for_model helps if model needs loading
         "options": {"wait_for_model": True},
-        # you can add "parameters": {"width": 1024, "height": 1024, "num_inference_steps": 20} if model supports it
+        "parameters": {
+            "width": 1024,
+            "height": 1024,
+            "num_inference_steps": 40,
+            "guidance_scale": 7.5,
+            "negative_prompt": (
+                "blurry, low quality, distorted, deformed, watermark, text, "
+                "cropped, bad anatomy, out of frame, ugly, disfigured, lowres, "
+                "oversaturated, extra limbs, cartoon, poorly drawn, artifacts"
+            ),
+        },
     }
+
     try:
         resp = requests.post(url, headers=HEADERS, json=payload, timeout=timeout)
     except Exception as e:
@@ -286,54 +291,52 @@ def hf_request(model_id: str, prompt: str, timeout=60):
     if resp.status_code == 200 and content_type.startswith("image"):
         return True, True, resp.content, resp.status_code
 
-    # sometimes HF returns JSON with base64 or error text
+    # sometimes HF returns a JSON error
     try:
         txt = resp.text
     except:
         txt = "<no-text-response>"
     return True, False, txt, resp.status_code
 
+
 async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /img command — always generates using FLUX.1-dev.
+    """
     if not context.args:
         await update.message.reply_text("Usage: /img <prompt>")
         return
 
     prompt = " ".join(context.args)
-    await update.message.reply_text("🎨 Generating image... trying best available models (this may take a few seconds)")
+    status_msg = await update.message.reply_text("🎨 Generating image... please wait (≈1–2 min)")
 
-    last_error = None
-    for model in MODEL_CANDIDATES:
-        ok, is_image, content, status = hf_request(model, prompt)
-        if not ok:
-            last_error = f"{model}: request failed ({content})"
-            continue
-
-        if is_image:
+    # Retry Flux a few times for reliability
+    for attempt in range(3):
+        ok, is_image, content, status = hf_request("black-forest-labs/FLUX.1-dev", prompt)
+        if ok and is_image:
             bio = BytesIO(content)
-            bio.name = "image.png"
+            bio.name = "flux_image.png"
             bio.seek(0)
-            # 👇 Model name removed from caption
             await update.message.reply_photo(photo=bio, caption=f"Prompt: {prompt}")
+            await status_msg.delete()
             return
+        else:
+            print(f"[Flux] Attempt {attempt+1} failed — status={status}, resp={content[:200] if isinstance(content, str) else 'binary'}")
+            await asyncio.sleep(5)  # wait before retry
 
-        last_error = f"{model} returned status {status}: {content}"
-        if status == 404 or "Not Found" in str(content):
-            continue
-        continue
-
-    # Optional fallback: Pollinations (free)
+    # Optional fallback if all Flux attempts fail
     if POLLINATIONS_FALLBACK:
         try:
             poll_url = "https://image.pollinations.ai/prompt/" + requests.utils.quote(prompt)
             r = requests.get(poll_url, timeout=60)
             if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
-                # 👇 Model name removed from caption
                 await update.message.reply_photo(photo=r.content, caption=f"Prompt: {prompt}")
+                await status_msg.delete()
                 return
         except Exception as e:
-            last_error = (last_error or "") + f"\nPollinations fallback failed: {e}"
+            print(f"[Pollinations] Fallback failed: {e}")
 
-    await update.message.reply_text("❌ All models failed.\n" + (last_error or "unknown error"))
+    await status_msg.edit_text("❌failed to generate an image after several attempts.")
 
 
 def scrape_91mobiles_specs(query: str):
@@ -6601,6 +6604,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
