@@ -299,9 +299,8 @@ async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     prompt = " ".join(context.args)
-    await update.message.reply_text("Generating image... trying best available models (this may take a few seconds)")
+    await update.message.reply_text("🎨 Generating image... trying best available models (this may take a few seconds)")
 
-    # try each model in order
     last_error = None
     for model in MODEL_CANDIDATES:
         ok, is_image, content, status = hf_request(model, prompt)
@@ -313,30 +312,28 @@ async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bio = BytesIO(content)
             bio.name = "image.png"
             bio.seek(0)
-            await update.message.reply_photo(photo=bio, caption=f"Prompt: {prompt}\nModel: {model}")
+            # 👇 Model name removed from caption
+            await update.message.reply_photo(photo=bio, caption=f"Prompt: {prompt}")
             return
 
-        # Not an image => examine message and continue to next model
-        # Save last error to show user if everything fails
         last_error = f"{model} returned status {status}: {content}"
-        # If Not Found (404) — try next
         if status == 404 or "Not Found" in str(content):
             continue
-        # If HF returned a transient error, also try next
         continue
 
-    # If all HF models failed, optionally fallback to Pollinations (free)
+    # Optional fallback: Pollinations (free)
     if POLLINATIONS_FALLBACK:
         try:
             poll_url = "https://image.pollinations.ai/prompt/" + requests.utils.quote(prompt)
             r = requests.get(poll_url, timeout=60)
             if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
-                await update.message.reply_photo(photo=r.content, caption=f" Prompt: {prompt}\nModel: Pollinations (fallback)")
+                # 👇 Model name removed from caption
+                await update.message.reply_photo(photo=r.content, caption=f"Prompt: {prompt}")
                 return
         except Exception as e:
             last_error = (last_error or "") + f"\nPollinations fallback failed: {e}"
 
-    await update.message.reply_text("All models failed. Last error:\n" + (last_error or "unknown error"))
+    await update.message.reply_text("❌ All models failed.\n" + (last_error or "unknown error"))
 
 
 def scrape_91mobiles_specs(query: str):
@@ -6593,4 +6590,5 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
