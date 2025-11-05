@@ -972,7 +972,7 @@ import asyncio, random
 rps_games = {}
 
 def rps_mention(uid, name):
-    return f"[{name}](tg://user?id={uid})"
+    return f'<a href="tg://user?id={uid}">{name}</a>'
 
 def rps_result(c1, c2):
     if c1 == c2:
@@ -1043,9 +1043,9 @@ async def rps_start(client, message):
 
     sent = await client.send_message(
         chat_id,
-        "***Choose your game type:***",
+        "<b><i>Choose your game type:</i></b>",
         reply_markup=rps_main_menu(game_key),
-        parse_mode="markdown"
+        parse_mode="html"
     )
     rps_games[game_key]["msg_id"] = sent.id
 
@@ -1059,9 +1059,9 @@ async def rps_modebot_menu(client, query):
         return
     game["type"] = "bot"
     await query.message.edit_text(
-        "*_Select your round mode:_*",
+        "<i>Select your round mode:</i>",
         reply_markup=rps_mode_keyboard(game_key, "bot"),
-        parse_mode="markdown"
+        parse_mode="html"
     )
 
 @pyro_client.on_callback_query(pyro_filters.regex("^rps:modeplayer:"))
@@ -1072,9 +1072,9 @@ async def rps_modeplayer_menu(client, query):
         return
     game["type"] = "player"
     await query.message.edit_text(
-        "*_Select your game mode:_*",
+        "<i>Select your game mode:</i>",
         reply_markup=rps_mode_keyboard(game_key, "player"),
-        parse_mode="markdown"
+        parse_mode="html"
     )
 
 
@@ -1091,7 +1091,10 @@ async def rps_start_botgame(client, query):
     game["player2_name"] = "Bot"
 
     for i in range(5, 0, -1):
-        await query.message.edit_text(f"***Bot is ready!***\n*Game starts in* **{i}**…", parse_mode="markdown")
+        await query.message.edit_text(
+            f"<b><i>Bot is ready!</i></b><br><i>Game starts in</i> <b>{i}</b>…",
+            parse_mode="html"
+        )
         await asyncio.sleep(1)
 
     await rps_start_round(client, game_key)
@@ -1109,8 +1112,8 @@ async def rps_prepare_playergame(client, query):
 
     host = rps_mention(game["host_id"], game["host_name"])
     join_btn = rps_join_keyboard(game_key)
-    txt = f"***Game created by*** {host}\n\n**Players:**\n1) {host}\n2) *Waiting...*\n\n*_Invite someone to join by pressing Join Game_*"
-    await query.message.edit_text(txt, reply_markup=join_btn, parse_mode="markdown")
+    txt = f"<b>Game created by</b> {host}<br><br><b>Players:</b><br>1) {host}<br>2) <i>Waiting...</i><br><br><i>Invite someone to join by pressing Join Game</i>"
+    await query.message.edit_text(txt, reply_markup=join_btn, parse_mode="html")
 
 
 @pyro_client.on_callback_query(pyro_filters.regex("^rps:join:"))
@@ -1120,9 +1123,9 @@ async def rps_join_game(client, query):
     if not game:
         return
     if query.from_user.id == game["host_id"]:
-        return await query.answer("_You're the host!_", show_alert=True)
+        return await query.answer("You're the host!", show_alert=True)
     if game["player2_id"]:
-        return await query.answer("_Someone already joined!_", show_alert=True)
+        return await query.answer("Someone already joined!", show_alert=True)
 
     game["player2_id"] = query.from_user.id
     game["player2_name"] = query.from_user.first_name
@@ -1132,8 +1135,8 @@ async def rps_join_game(client, query):
 
     for i in range(5, 0, -1):
         await query.message.edit_text(
-            f"*Game starting in* **{i}**…\n\n**Players:**\n1) {host}\n2) {p2}",
-            parse_mode="markdown"
+            f"<i>Game starting in</i> <b>{i}</b>…<br><br><b>Players:</b><br>1) {host}<br>2) {p2}",
+            parse_mode="html"
         )
         await asyncio.sleep(1)
 
@@ -1148,20 +1151,20 @@ async def rps_start_round(client, game_key):
 
     game["choices"] = {}
     host = rps_mention(game["host_id"], game["host_name"])
-    p2 = rps_mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "***Bot***"
+    p2 = rps_mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "<b><i>Bot</i></b>"
 
     text = (
-        f"***Round Starting!***\n\n"
-        f"**Scores:** `{game['scores']['p1']} - {game['scores']['p2']}`\n\n"
-        f"**Players:**\n1) {host}\n2) {p2}\n\n"
-        f"*__Make your choice below!__*"
+        f"<b>Round Starting!</b><br><br>"
+        f"<b>Scores:</b> <code>{game['scores']['p1']} - {game['scores']['p2']}</code><br><br>"
+        f"<b>Players:</b><br>1) {host}<br>2) {p2}<br><br>"
+        f"<i>Make your choice below!</i>"
     )
     await client.edit_message_text(
         game["chat_id"],
         game["msg_id"],
         text,
         reply_markup=rps_choice_keyboard(game_key),
-        parse_mode="markdown"
+        parse_mode="html"
     )
 
 
@@ -1175,22 +1178,22 @@ async def rps_choice(client, query):
 
     user_id = query.from_user.id
     if game["type"] == "player" and user_id not in [game["host_id"], game["player2_id"]]:
-        return await query.answer("_You're not in this game!_", show_alert=True)
+        return await query.answer("You're not in this game!", show_alert=True)
     if game["type"] == "bot" and user_id != game["host_id"]:
-        return await query.answer("_Only the player can choose!_", show_alert=True)
+        return await query.answer("Only the player can choose!", show_alert=True)
 
     player = "p1"
     if game["type"] == "player" and user_id == game["player2_id"]:
         player = "p2"
 
     if player in game["choices"]:
-        return await query.answer("_You already picked!_", show_alert=True)
+        return await query.answer("You already picked!", show_alert=True)
 
     if choice == "random":
         choice = random.choice(["stone", "paper", "scissor"])
-        await query.answer(f"*You got* __{choice.capitalize()}!__", show_alert=True)
+        await query.answer(f"You got {choice.capitalize()}!", show_alert=True)
     else:
-        await query.answer(f"***You chose {choice.capitalize()} ✅***")
+        await query.answer(f"You chose {choice.capitalize()} ✅")
 
     game["choices"][player] = choice
 
@@ -1204,24 +1207,24 @@ async def rps_choice(client, query):
         res = rps_result(c1, c2)
 
         host = rps_mention(game["host_id"], game["host_name"])
-        p2 = rps_mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "***Bot***"
+        p2 = rps_mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "<b><i>Bot</i></b>"
 
         txt = (
-            f"{host} *played* __{c1.capitalize()}__\n"
-            f"{p2} *played* __{c2.capitalize()}__\n\n"
+            f"{host} <i>played</i> <b>{c1.capitalize()}</b><br>"
+            f"{p2} <i>played</i> <b>{c2.capitalize()}</b><br><br>"
         )
 
         if res == "draw":
-            txt += "***It's a draw!***"
+            txt += "<b><i>It's a draw!</i></b>"
         elif res == "p1":
             game["scores"]["p1"] += 1
-            txt += f"***{host} wins this round!***"
+            txt += f"<b><i>{host} wins this round!</i></b>"
         else:
             game["scores"]["p2"] += 1
-            txt += f"***{p2} wins this round!***"
+            txt += f"<b><i>{p2} wins this round!</i></b>"
 
         await client.edit_message_text(
-            game["chat_id"], game["msg_id"], txt, parse_mode="markdown"
+            game["chat_id"], game["msg_id"], txt, parse_mode="html"
         )
         await asyncio.sleep(3)
 
@@ -1229,15 +1232,15 @@ async def rps_choice(client, query):
         if game["scores"]["p1"] >= target:
             await client.edit_message_text(
                 game["chat_id"], game["msg_id"],
-                f"***{host}*** *_wins the game!_*\n\n**Final Score:** `{game['scores']['p1']} - {game['scores']['p2']}`",
-                parse_mode="markdown"
+                f"<b><i>{host}</i></b> <i>wins the game!</i><br><br><b>Final Score:</b> <code>{game['scores']['p1']} - {game['scores']['p2']}</code>",
+                parse_mode="html"
             )
             del rps_games[game_key]
         elif game["scores"]["p2"] >= target:
             await client.edit_message_text(
                 game["chat_id"], game["msg_id"],
-                f"***{p2}*** *_wins the game!_*\n\n**Final Score:** `{game['scores']['p1']} - {game['scores']['p2']}`",
-                parse_mode="markdown"
+                f"<b><i>{p2}</i></b> <i>wins the game!</i><br><br><b>Final Score:</b> <code>{game['scores']['p1']} - {game['scores']['p2']}</code>",
+                parse_mode="html"
             )
             del rps_games[game_key]
         else:
@@ -6879,7 +6882,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
