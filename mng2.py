@@ -1051,7 +1051,8 @@ async def rps_start(client, message):
 
 
 # === Mode selection ===
-@pyro_client.on_callback_query(pyro_filters.regex(r"^rps:modebot"))
+@pyro_client.on_callback_query(pyro_filters.regex(r"^rps:modebot:"))
+
 
 async def rps_modebot_menu(client, query):
     game_key = query.data.split(":")[-1]
@@ -6878,7 +6879,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
