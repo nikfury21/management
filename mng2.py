@@ -6668,6 +6668,13 @@ def mention(uid: int, name: str) -> str:
     safe = html.escape(name or "User")
     return f"<a href='tg://user?id={uid}'>{safe}</a>"
 
+def mk_mode_markup(chat_id: int, host_id: int):
+    return PyroMarkup([
+        [PyroButton(" Play with Bot", callback_data=f"mode:{chat_id}:{host_id}:bot")],
+        [PyroButton(" Play with Player", callback_data=f"mode:{chat_id}:{host_id}:player")]
+    ])
+
+
 def mk_join_markup(chat_id: int, host_id: int):
     return PyroMarkup([
         [PyroButton(" Join", callback_data=f"join:{chat_id}:{host_id}")],
@@ -6741,7 +6748,7 @@ async def start_game(_, m: Message):
         "host_id": user.id,
         "players": [user.id],
         "player_names": {user.id: user.first_name or "Player"},
-        "status": "waiting",
+        "status": "choosing_mode",
         "message_id": None,
         "score": {},
         "balls_played": 0,
@@ -6752,26 +6759,89 @@ async def start_game(_, m: Message):
         "target": None
     }
 
-    host_m = mention(user.id, user.first_name or "Host")
     txt = (
-        f"<b><i><u>🏟️ New Cricket Game Created</u></i></b>\n"
-        f"Host: {host_m}\n\n"
-        f"<b>Players —</b>\n1. {host_m}\n2. <i><u>Waiting for player...</u></i>\n\n"
-        f"<i>Host, click 'Join' to enter the match or wait for another to join.</i>"
+        f"<b><i><u>🏏 Choose Game Mode</u></i></b>\n\n"
+        f"<b>Host:</b> {mention(user.id, user.first_name or 'Host')}\n\n"
+        f"Select how you want to play:"
     )
-    sent = await m.reply_text(txt, reply_markup=mk_join_markup(chat_id, user.id), parse_mode=PyroParseMode.HTML)
+    sent = await m.reply_text(txt, reply_markup=mk_mode_markup(chat_id, user.id), parse_mode=PyroParseMode.HTML)
     games[chat_id]["message_id"] = sent.id
 
 # === CALLBACKS ===
 @pyro_client.on_callback_query()
 async def callbacks(_, q: CallbackQuery):
     data = q.data or ""
-    if data.startswith("join:"): await join_game(q)
+    if data.startswith("mode:"): await select_mode(q)
+    elif data.startswith("join:"): await join_game(q)
     elif data.startswith("cancel:"): await cancel_game(q)
     elif data.startswith("toss:"): await toss_coin(q)
     elif data.startswith("choose:"): await choose_option(q)
     elif data.startswith("run:"): await handle_run(q)
     else: await q.answer()
+
+
+async def select_mode(q: CallbackQuery):
+    _, chat_s, host_s, mode = q.data.split(":")
+    chat_id, host_id = int(chat_s), int(host_s)
+    user = q.from_user
+
+    if chat_id not in games:
+        return await q.answer("No active game.")
+    g = games[chat_id]
+    if user.id != g["host_id"]:
+        return await q.answer("Only host can choose mode.", show_alert=True)
+
+    if mode == "player":
+        # Normal player-vs-player mode
+        txt = (
+            f"<b><i><u>🏟️ New Cricket Game Created</u></i></b>\n"
+            f"Host: {mention(user.id, user.first_name or 'Host')}\n\n"
+            f"<b>Players —</b>\n1. {mention(user.id, user.first_name or 'Host')}\n"
+            f"2. <i><u>Waiting for player...</u></i>\n\n"
+            f"<i>Host, click 'Join' to enter the match or wait for another to join.</i>"
+        )
+        try:
+            await q.message.edit_text(txt, reply_markup=mk_join_markup(chat_id, user.id), parse_mode=PyroParseMode.HTML)
+        except Exception:
+            pass
+        g["status"] = "waiting"
+        await q.answer("Player vs Player mode selected ✅")
+
+    elif mode == "bot":
+        # Bot mode setup
+        bot_id = 0  # pseudo ID for bot
+        bot_name = "🤖 Bot"
+        g["players"].append(bot_id)
+        g["player_names"][bot_id] = bot_name
+        g["score"][user.id] = {"runs": 0, "balls": 0}
+        g["score"][bot_id] = {"runs": 0, "balls": 0}
+
+        txt = (
+            f"<b><i><u>🤖 Bot Mode Selected</u></i></b>\n"
+            f"{mention(user.id, user.first_name)} vs <b>{bot_name}</b>\n\n"
+            f"<i>Bot is ready to play!\nGame starting in 3... 2... 1...</i>"
+        )
+        try:
+            await q.message.edit_text(txt, parse_mode=PyroParseMode.HTML)
+        except Exception:
+            pass
+        await asyncio.sleep(3)
+
+        # Simulate immediate toss
+        toss_call = random.choice(["heads", "tails"])
+        flip = random.choice(["heads", "tails"])
+        winner = user.id if toss_call == flip else bot_id
+
+        chooser = winner
+        pick = random.choice(["bat", "bowl"])
+
+        # Reuse choose_option
+        fake_query = q
+        fake_query.data = f"choose:{chat_id}:{chooser}:{pick}"
+        await choose_option(fake_query)
+
+        g["mode"] = "bot"
+        await q.answer("Bot mode selected ✅")
 
 async def join_game(q: CallbackQuery):
     _, chat_s, host_s = q.data.split(":")
@@ -6915,6 +6985,13 @@ async def handle_run(q: CallbackQuery):
 
     if user.id not in g["players"]:
         return await q.answer("You are not a player in this game.", show_alert=True)
+    # === BOT MODE LOGIC ===
+    if g.get("mode") == "bot":
+        bot_id = 0
+        if g["current_bowler"] == bot_id and pending["bowler_choice"] is None:
+            pending["bowler_choice"] = random.randint(1, 6)
+        if g["current_batter"] == bot_id and pending["batter_choice"] is None:
+            pending["batter_choice"] = random.randint(1, 6)
 
     # Bowler chooses first
     if user.id == bowler:
@@ -7295,4 +7372,3 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
