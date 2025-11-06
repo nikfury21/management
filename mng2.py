@@ -1050,7 +1050,8 @@ async def rps_start(client, message):
 # === Mode selection ===
 @pyro_client.on_callback_query(pyro_filters.regex("^rps:modebot:"))
 async def rps_modebot_menu(client, query):
-    _, _, game_key = query.data.split(":")
+    game_key = query.data.split(":")[-1]
+
     game = rps_games.get(game_key)
     if not game:
         return
@@ -1063,7 +1064,8 @@ async def rps_modebot_menu(client, query):
 
 @pyro_client.on_callback_query(pyro_filters.regex("^rps:modeplayer:"))
 async def rps_modeplayer_menu(client, query):
-    _, _, game_key = query.data.split(":")
+    game_key = query.data.split(":")[-1]
+
     game = rps_games.get(game_key)
     if not game:
         return
@@ -1115,7 +1117,8 @@ async def rps_prepare_playergame(client, query):
 
 @pyro_client.on_callback_query(pyro_filters.regex("^rps:join:"))
 async def rps_join_game(client, query):
-    _, _, game_key = query.data.split(":")
+    game_key = query.data.split(":")[-1]
+
     game = rps_games.get(game_key)
     if not game:
         return
