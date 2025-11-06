@@ -986,36 +986,48 @@ def rps_result(c1, c2):
 
 
 # === Inline Keyboards ===
+# === Inline Keyboards ===
 def rps_main_menu(game_key):
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("Play with Bot", callback_data=f"rps:modebot:{game_key}"),
-            InlineKeyboardButton("Play with Player", callback_data=f"rps:modeplayer:{game_key}")
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "Play with Bot", "callback_data": f"rps:modebot:{game_key}"},
+                {"text": "Play with Player", "callback_data": f"rps:modeplayer:{game_key}"}
+            ]
         ]
-    ])
+    }
 
 def rps_mode_keyboard(game_key, mode_type):
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("Best of 3", callback_data=f"rps:{mode_type}_3:{game_key}"),
-            InlineKeyboardButton("Best of 5", callback_data=f"rps:{mode_type}_5:{game_key}")
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "Best of 3", "callback_data": f"rps:{mode_type}_3:{game_key}"},
+                {"text": "Best of 5", "callback_data": f"rps:{mode_type}_5:{game_key}"}
+            ]
         ]
-    ])
+    }
 
 def rps_join_keyboard(game_key):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Join Game", callback_data=f"rps:join:{game_key}")]
-    ])
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "Join Game", "callback_data": f"rps:join:{game_key}"}
+            ]
+        ]
+    }
 
 def rps_choice_keyboard(game_key):
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("Stone", callback_data=f"rps:stone:{game_key}"),
-            InlineKeyboardButton("Paper", callback_data=f"rps:paper:{game_key}"),
-            InlineKeyboardButton("Scissor", callback_data=f"rps:scissor:{game_key}"),
-            InlineKeyboardButton("Random", callback_data=f"rps:random:{game_key}")
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "Stone", "callback_data": f"rps:stone:{game_key}"},
+                {"text": "Paper", "callback_data": f"rps:paper:{game_key}"},
+                {"text": "Scissor", "callback_data": f"rps:scissor:{game_key}"},
+                {"text": "Random", "callback_data": f"rps:random:{game_key}"}
+            ]
         ]
-    ])
+    }
+
 
 
 # === /rps command ===
@@ -6871,6 +6883,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
