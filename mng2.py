@@ -6702,7 +6702,7 @@ def mk_run_buttons(chat_id: int):
 
 
 # === STATE ===
-games: Dict[int, Dict[str, Any]] = {}
+games: Dict[tuple[int, int], Dict[str, Any]] = {}
 
 # === HELPERS ===
 def format_scoreboard(g: Dict[str, Any]) -> str:
@@ -6738,18 +6738,20 @@ async def start_game(_, m: Message):
     chat_id = m.chat.id
     user = m.from_user
 
-    if chat_id in games:
-        await m.reply_text(
-            "<b><i><u>❗ A game is already running in this chat.</u></i></b>\nFinish it before starting a new one.",
-            parse_mode=PyroParseMode.HTML)
-        return
+    txt = (
+        f"<b><i><u>🏏 Choose Game Mode</u></i></b>\n\n"
+        f"<b>Host:</b> {mention(user.id, user.first_name or 'Host')}\n\n"
+        f"Select how you want to play:"
+    )
+    sent = await m.reply_text(txt, reply_markup=mk_mode_markup(chat_id, user.id), parse_mode=PyroParseMode.HTML)
 
-    games[chat_id] = {
+    key = (chat_id, sent.id)
+    games[key] = {
         "host_id": user.id,
         "players": [user.id],
         "player_names": {user.id: user.first_name or "Player"},
         "status": "choosing_mode",
-        "message_id": None,
+        "message_id": sent.id,
         "score": {},
         "balls_played": 0,
         "overs": 0,
@@ -6758,14 +6760,6 @@ async def start_game(_, m: Message):
         "first_innings_runs": None,
         "target": None
     }
-
-    txt = (
-        f"<b><i><u>🏏 Choose Game Mode</u></i></b>\n\n"
-        f"<b>Host:</b> {mention(user.id, user.first_name or 'Host')}\n\n"
-        f"Select how you want to play:"
-    )
-    sent = await m.reply_text(txt, reply_markup=mk_mode_markup(chat_id, user.id), parse_mode=PyroParseMode.HTML)
-    games[chat_id]["message_id"] = sent.id
 
 # === CALLBACKS ===
 @pyro_client.on_callback_query()
@@ -6785,9 +6779,11 @@ async def select_mode(q: CallbackQuery):
     chat_id, host_id = int(chat_s), int(host_s)
     user = q.from_user
 
-    if chat_id not in games:
+    key = (chat_id, q.message.id)
+    if key not in games:
         return await q.answer("No active game.")
-    g = games[chat_id]
+    g = games[key]
+
     if user.id != g["host_id"]:
         return await q.answer("Only host can choose mode.", show_alert=True)
 
@@ -6801,7 +6797,11 @@ async def select_mode(q: CallbackQuery):
             f"<i>Host, click 'Join' to enter the match or wait for another to join.</i>"
         )
         try:
-            await q.message.edit_text(txt, reply_markup=mk_join_markup(chat_id, user.id), parse_mode=PyroParseMode.HTML)
+            await q.message.edit_text(
+                txt,
+                reply_markup=mk_join_markup(chat_id, user.id),
+                parse_mode=PyroParseMode.HTML
+            )
         except Exception:
             pass
         g["status"] = "waiting"
@@ -6827,30 +6827,62 @@ async def select_mode(q: CallbackQuery):
             pass
         await asyncio.sleep(3)
 
-        # Simulate immediate toss
+        # --- Simulate toss automatically and start directly ---
         toss_call = random.choice(["heads", "tails"])
         flip = random.choice(["heads", "tails"])
         winner = user.id if toss_call == flip else bot_id
-
-        chooser = winner
         pick = random.choice(["bat", "bowl"])
 
-        # Reuse choose_option
-        fake_query = q
-        fake_query.data = f"choose:{chat_id}:{chooser}:{pick}"
-        await choose_option(fake_query)
+        p1, p2 = g["players"]
+        if pick == "bat":
+            batting = winner
+            bowling = p1 if winner == p2 else p2
+        else:
+            bowling = winner
+            batting = p1 if winner == p2 else p2
 
-        g["mode"] = "bot"
+        g.update({
+            "mode": "bot",
+            "status": "playing",
+            "current_batter": batting,
+            "current_bowler": bowling,
+            "balls_played": 0,
+            "overs": 0,
+            "pending": {"bowler_choice": None, "batter_choice": None},
+            "innings": 1,
+            "first_innings_runs": None,
+            "target": None
+        })
+
+        txt = (
+            f"<b><i><u>🏏 Match Start</u></i></b>\n"
+            f"Over- <b>0.0</b>\n\n"
+            f"<b>Batter</b> - {mention(batting, g['player_names'][batting])}\n"
+            f"<b>Bowler</b> - {mention(bowling, g['player_names'][bowling])}\n\n"
+            f"<i>Bowler, choose a number (1-6). Then Batter will select a number.</i>"
+        )
+
+        try:
+            await q.message.edit_text(
+                txt,
+                reply_markup=mk_run_buttons(chat_id),
+                parse_mode=PyroParseMode.HTML
+            )
+        except Exception:
+            pass
         await q.answer("Bot mode selected ✅")
+
 
 async def join_game(q: CallbackQuery):
     _, chat_s, host_s = q.data.split(":")
     chat_id, host_id = int(chat_s), int(host_s)
     user = q.from_user
 
-    if chat_id not in games:
-        return await q.answer("No active game.", show_alert=True)
-    g = games[chat_id]
+    key = (chat_id, q.message.id)
+    if key not in games:
+        return await q.answer("No active game.")
+    g = games[key]
+
     if len(g["players"]) >= 2:
         return await q.answer("Game already has 2 players.", show_alert=True)
     if user.id in g["players"]:
@@ -6878,9 +6910,11 @@ async def cancel_game(q: CallbackQuery):
     _, chat_s, host_s = q.data.split(":")
     chat_id, host_id = int(chat_s), int(host_s)
     user = q.from_user
-    if chat_id not in games:
+    key = (chat_id, q.message.id)
+    if key not in games:
         return await q.answer("No active game.")
-    g = games[chat_id]
+    g = games[key]
+
     if user.id != g["host_id"]:
         return await q.answer("Only host can cancel.", show_alert=True)
     try:
@@ -6894,9 +6928,11 @@ async def toss_coin(q: CallbackQuery):
     _, chat_s, host_s, call = q.data.split(":")
     chat_id, host_id = int(chat_s), int(host_s)
     user = q.from_user
-    if chat_id not in games:
+    key = (chat_id, q.message.id)
+    if key not in games:
         return await q.answer("No active game.")
-    g = games[chat_id]
+    g = games[key]
+
     if user.id != g["host_id"]:
         return await q.answer("Only host can toss.", show_alert=True)
     if len(g["players"]) < 2:
@@ -6925,9 +6961,11 @@ async def choose_option(q: CallbackQuery):
     _, chat_s, chooser_s, pick = q.data.split(":")
     chat_id, chooser_id = int(chat_s), int(chooser_s)
     user = q.from_user
-    if chat_id not in games:
+    key = (chat_id, q.message.id)
+    if key not in games:
         return await q.answer("No active game.")
-    g = games[chat_id]
+    g = games[key]
+
     if user.id != chooser_id:
         return await q.answer("Only the toss winner can choose.", show_alert=True)
 
@@ -6973,9 +7011,11 @@ async def handle_run(q: CallbackQuery):
     chat_id, num = int(chat_s), int(num_s)
     user = q.from_user
 
-    if chat_id not in games:
+    key = (chat_id, q.message.id)
+    if key not in games:
         return await q.answer("No active game.")
-    g = games[chat_id]
+    g = games[key]
+
     if g.get("status") != "playing":
         return await q.answer("Match not in progress.", show_alert=True)
 
