@@ -8,10 +8,7 @@ import asyncio
 from pyrogram.enums import ChatMemberStatus
 import sys, asyncio
 from telegram import InputMediaDocument
-
-
-
-
+from pyrogram.types import InlineKeyboardButton as PyroButton, InlineKeyboardMarkup as PyroMarkup
 import requests
 from requests.exceptions import Timeout, RequestException
 import logging
@@ -990,31 +987,31 @@ def result(c1, c2):
     return "p2"
 
 def main_menu(game_key):
-    return InlineKeyboardMarkup([
+    return PyroMarkup([
         [
-            InlineKeyboardButton("Play with Bot", callback_data=f"rps:modebot:{game_key}"),
-            InlineKeyboardButton("Play with Player", callback_data=f"rps:modeplayer:{game_key}")
+            PyroButton("Play with Bot", callback_data=f"rps:modebot:{game_key}"),
+            PyroButton("Play with Player", callback_data=f"rps:modeplayer:{game_key}")
         ]
     ])
 
 def mode_keyboard(game_key, mode_type):
-    return InlineKeyboardMarkup([
+    return PyroMarkup([
         [
-            InlineKeyboardButton("Best of 3", callback_data=f"rps:{mode_type}_3:{game_key}"),
-            InlineKeyboardButton("Best of 5", callback_data=f"rps:{mode_type}_5:{game_key}")
+            PyroButton("Best of 3", callback_data=f"rps:{mode_type}_3:{game_key}"),
+            PyroButton("Best of 5", callback_data=f"rps:{mode_type}_5:{game_key}")
         ]
     ])
 
 def join_keyboard(game_key):
-    return InlineKeyboardMarkup([[InlineKeyboardButton("Join Game", callback_data=f"rps:join:{game_key}")]])
+    return PyroMarkup([[PyroButton("Join Game", callback_data=f"rps:join:{game_key}")]])
 
 def choice_keyboard(game_key):
-    return InlineKeyboardMarkup([
+    return PyroMarkup([
         [
-            InlineKeyboardButton("Stone", callback_data=f"rps:stone:{game_key}"),
-            InlineKeyboardButton("Paper", callback_data=f"rps:paper:{game_key}"),
-            InlineKeyboardButton("Scissor", callback_data=f"rps:scissor:{game_key}"),
-            InlineKeyboardButton("Random", callback_data=f"rps:random:{game_key}")
+            PyroButton("Stone", callback_data=f"rps:stone:{game_key}"),
+            PyroButton("Paper", callback_data=f"rps:paper:{game_key}"),
+            PyroButton("Scissor", callback_data=f"rps:scissor:{game_key}"),
+            PyroButton("Random", callback_data=f"rps:random:{game_key}")
         ]
     ])
 
