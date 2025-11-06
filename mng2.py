@@ -1199,17 +1199,18 @@ async def rps_choice(client, query):
         if game["scores"]["p1"] >= target:
             await client.edit_message_text(
                 game["chat_id"], game["msg_id"],
-                f"<b><i><u>{host} wins the game!</u></i></b>\n<b>Final Score:</b> {game['scores']['p1']} - {game['scores']['p2']}",
+                f"<b><i><u>{host} wins the game against {p2}!</u></i></b>\n<b>Final Score:</b> {game['scores']['p1']} - {game['scores']['p2']}",
                 parse_mode=PyroParseMode.HTML
             )
             del rps_games[game_key]
         elif game["scores"]["p2"] >= target:
             await client.edit_message_text(
                 game["chat_id"], game["msg_id"],
-                f"<b><i><u>{p2} wins the game!</u></i></b>\n<b>Final Score:</b> {game['scores']['p1']} - {game['scores']['p2']}",
+                f"<b><i><u>{p2} wins the game against {host}!</u></i></b>\n<b>Final Score:</b> {game['scores']['p1']} - {game['scores']['p2']}",
                 parse_mode=PyroParseMode.HTML
             )
             del rps_games[game_key]
+
         else:
             await start_round(client, game_key)
 
@@ -6874,4 +6875,3 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
