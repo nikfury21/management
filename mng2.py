@@ -1144,6 +1144,74 @@ async def start_round(client, game_key):
         parse_mode=PyroParseMode.HTML
 
     )
+@pyro_client.on_callback_query(pyro_filters.regex(r"^rps:(stone|paper|scissor|random):.+"))
+async def rps_choice(client, query):
+    _, choice, game_key = query.data.split(":")
+    game = rps_games.get(game_key)
+    if not game:
+        return
+
+    user_id = query.from_user.id
+    if game["type"] == "player" and user_id not in [game["host_id"], game["player2_id"]]:
+        return await query.answer("You're not in this game!", show_alert=True)
+    if game["type"] == "bot" and user_id != game["host_id"]:
+        return await query.answer("Only the player can choose!", show_alert=True)
+
+    player = "p1" if user_id == game["host_id"] else "p2"
+    if player in game["choices"]:
+        return await query.answer("You already picked!", show_alert=True)
+
+    if choice == "random":
+        choice = random.choice(["stone", "paper", "scissor"])
+        await query.answer(f"Random → {choice.capitalize()}!", show_alert=True)
+    else:
+        await query.answer(f"You chose {choice.capitalize()} ✅")
+
+    game["choices"][player] = choice
+
+    if game["type"] == "bot":
+        game["choices"]["p2"] = random.choice(["stone", "paper", "scissor"])
+        await asyncio.sleep(1)
+
+    if len(game["choices"]) == 2:
+        c1, c2 = game["choices"]["p1"], game["choices"]["p2"]
+        res = result(c1, c2)
+
+        host = mention(game["host_id"], game["host_name"])
+        p2 = mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "<b>Bot</b>"
+
+        txt = f"<b>Choices:</b>\n{host} → <b>{c1.capitalize()}</b>\n{p2} → <b>{c2.capitalize()}</b>\n"
+        if res == "draw":
+            txt += "<b><i><u>It's a Draw!</u></i></b>"
+        elif res == "p1":
+            game["scores"]["p1"] += 1
+            txt += f"<b><i><u>{host} wins this round!</u></i></b>"
+        else:
+            game["scores"]["p2"] += 1
+            txt += f"<b><i><u>{p2} wins this round!</u></i></b>"
+
+        await client.edit_message_text(
+            game["chat_id"], game["msg_id"], txt, parse_mode=PyroParseMode.HTML
+        )
+        await asyncio.sleep(2)
+
+        target = game["mode"] // 2 + 1
+        if game["scores"]["p1"] >= target:
+            await client.edit_message_text(
+                game["chat_id"], game["msg_id"],
+                f"<b><i><u>{host} wins the game!</u></i></b>\n<b>Final Score:</b> {game['scores']['p1']} - {game['scores']['p2']}",
+                parse_mode=PyroParseMode.HTML
+            )
+            del rps_games[game_key]
+        elif game["scores"]["p2"] >= target:
+            await client.edit_message_text(
+                game["chat_id"], game["msg_id"],
+                f"<b><i><u>{p2} wins the game!</u></i></b>\n<b>Final Score:</b> {game['scores']['p1']} - {game['scores']['p2']}",
+                parse_mode=PyroParseMode.HTML
+            )
+            del rps_games[game_key]
+        else:
+            await start_round(client, game_key)
 
 
 @pyro_client.on_message(pyro_filters.command("rzombies"))
@@ -6806,3 +6874,4 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
