@@ -37,7 +37,7 @@ from telethon.tl.types import ChatParticipantAdmin, ChatParticipantCreator
 from datetime import datetime, timedelta, time as dt_time
 import time  # standard module for time.time()
 import time 
-from pyrogram.enums import ParseMode
+from pyrogram.enums import ParseMode as PyroParseMode
 import io
 import asyncio
 from groq import Client
@@ -1040,7 +1040,8 @@ async def rps_start(client, message):
     sent = await message.reply_text(
         "<b><i><u>Choose your game type:</u></i></b>",
         reply_markup=main_menu(game_key),
-        parse_mode=ParseMode.HTML
+        parse_mode=PyroParseMode.HTML
+
     )
     rps_games[game_key]["msg_id"] = sent.id
 
@@ -1054,7 +1055,8 @@ async def rps_modebot_menu(client, query):
     await query.message.edit_text(
         "<i><u>Select your round mode:</u></i>",
         reply_markup=mode_keyboard(game_key, "bot"),
-        parse_mode=ParseMode.HTML
+        parse_mode=PyroParseMode.HTML
+
     )
 
 @pyro_client.on_callback_query(filters.regex("rps:modeplayer"))
@@ -1067,7 +1069,8 @@ async def rps_modeplayer_menu(client, query):
     await query.message.edit_text(
         "<i><u>Select your game mode:</u></i>",
         reply_markup=mode_keyboard(game_key, "player"),
-        parse_mode=ParseMode.HTML
+        parse_mode=PyroParseMode.HTML
+
     )
 
 @pyro_client.on_callback_query(filters.regex(r"^rps:bot_\d+:.+"))
@@ -1080,7 +1083,8 @@ async def rps_start_botgame(client, query):
     game["player2_id"] = 0
     game["player2_name"] = "Bot"
     for i in range(3, 0, -1):
-        await query.message.edit_text(f"<b><i>Bot ready!</i></b>\n\n<b><i><u>Starting in<b><i><u> <b>{i}</b>…", parse_mode=ParseMode.HTML)
+        await query.message.edit_text(f"<b><i>Bot ready!</i></b>\n\n<b><i><u>Starting in<b><i><u> <b>{i}</b>…", parse_mode=PyroParseMode.HTML
+)
         await asyncio.sleep(1)
     await start_round(client, game_key)
 
@@ -1097,7 +1101,8 @@ async def rps_prepare_playergame(client, query):
         f"<b>Players:</b>\n1️⃣ {host}\n2️⃣ <i>Waiting...</i>\n"
         f"<u>Invite someone to join:</u>"
     )
-    await query.message.edit_text(txt, reply_markup=join_keyboard(game_key), parse_mode=ParseMode.HTML)
+    await query.message.edit_text(txt, reply_markup=join_keyboard(game_key), parse_mode=PyroParseMode.HTML
+)
 
 @pyro_client.on_callback_query(filters.regex(r"^rps:join:.+"))
 async def rps_join_game(client, query):
@@ -1116,7 +1121,8 @@ async def rps_join_game(client, query):
         await query.message.edit_text(
             f"<b><i><u>Game starting in {i}...</u></i></b>\n"
             f"<b>Players:</b>\n1️⃣ {host}\n2️⃣ {p2}",
-            parse_mode=ParseMode.HTML
+            parse_mode=PyroParseMode.HTML
+
         )
         await asyncio.sleep(1)
     await start_round(client, game_key)
@@ -1138,7 +1144,8 @@ async def start_round(client, game_key):
         message_id=game["msg_id"],
         text=text,
         reply_markup=choice_keyboard(game_key),
-        parse_mode=ParseMode.HTML
+        parse_mode=PyroParseMode.HTML
+
     )
 
 
@@ -1686,7 +1693,8 @@ async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chatname = chat.title
                     def replace_vars(text): return text.replace("{mention}", mention).replace("{chat}", chatname)
                     if "text" in msg_data:
-                        await update.message.reply_text(replace_vars(msg_data["text"]), parse_mode=ParseMode.HTML)
+                        await update.message.reply_text(replace_vars(msg_data["text"]), parse_mode=PyroParseMode.HTML
+)
                     else:
                         try:
                             await context.bot.copy_message(
@@ -1694,7 +1702,8 @@ async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 from_chat_id=chat_id,
                                 message_id=msg_data["message_id"],
                                 caption=replace_vars(msg_data.get("caption", "")) if msg_data.get("caption") else None,
-                                parse_mode=ParseMode.HTML
+                                parse_mode=PyroParseMode.HTML
+
                             )
                         except Exception as e:
                             await update.message.reply_text(f"⚠️ Failed to send welcome message: {e}")
@@ -1724,7 +1733,8 @@ async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if msg_data:  # custom welcome
             def replace_vars(text): return text.replace("{mention}", mention).replace("{chat}", chatname)
             if "text" in msg_data:
-                await update.message.reply_text(replace_vars(msg_data["text"]), parse_mode=ParseMode.HTML, reply_markup=btn)
+                await update.message.reply_text(replace_vars(msg_data["text"]), parse_mode=PyroParseMode.HTML
+, reply_markup=btn)
             else:
                 try:
                     await context.bot.copy_message(
@@ -1732,7 +1742,8 @@ async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         from_chat_id=chat_id,
                         message_id=msg_data["message_id"],
                         caption=replace_vars(msg_data.get("caption", "")) if msg_data.get("caption") else None,
-                        parse_mode=ParseMode.HTML,
+                        parse_mode=PyroParseMode.HTML
+,
                         reply_markup=btn
                     )
                 except Exception as e:
@@ -1740,7 +1751,8 @@ async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:  # fallback welcome
             await update.message.reply_text(
                 f"Hi {mention}! Tap the button below to verify and unmute.",
-                parse_mode=ParseMode.HTML,
+                parse_mode=PyroParseMode.HTML
+,
                 reply_markup=btn
             )
 
@@ -2099,7 +2111,8 @@ async def anime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_photo(
         photo=anime["coverImage"]["large"],
         caption=caption,
-        parse_mode=ParseMode.HTML,
+        parse_mode=PyroParseMode.HTML
+,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -2594,7 +2607,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = _build_9_options_keyboard(chat_id, user_id, ans)
         return await update.message.reply_text(
             f"Solve to unmute:\n<b>{q} = ?</b>\n\nYou have 3 tries.",
-            parse_mode=ParseMode.HTML,
+            parse_mode=PyroParseMode.HTML
+,
             reply_markup=kb,
         )
 
@@ -3032,19 +3046,22 @@ async def send_movie_page(update_or_query, context, movie, edit=False):
 
     if edit:
         await update_or_query.edit_message_caption(
-            caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup
+            caption=caption, parse_mode=PyroParseMode.HTML
+, reply_markup=markup
         )
     else:
         if poster and poster != "N/A":
             await update_or_query.message.reply_photo(
                 photo=poster,
                 caption=caption,
-                parse_mode=ParseMode.HTML,
+                parse_mode=PyroParseMode.HTML
+,
                 reply_markup=markup,
             )
         else:
             await update_or_query.message.reply_text(
-                caption, parse_mode=ParseMode.HTML, reply_markup=markup
+                caption, parse_mode=PyroParseMode.HTML
+, reply_markup=markup
             )
 
 
@@ -3068,7 +3085,8 @@ async def movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_caption(
             caption=f"📝 <b>{title}</b>\n\n{plot}",
-            parse_mode=ParseMode.HTML,
+            parse_mode=PyroParseMode.HTML
+,
             reply_markup=markup,
         )
 
@@ -3088,7 +3106,8 @@ async def movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not cast:
             await query.edit_message_caption(
                 caption="❌ No cast info available.",
-                parse_mode=ParseMode.HTML,
+                parse_mode=PyroParseMode.HTML
+,
                 reply_markup=InlineKeyboardMarkup(
                     [[InlineKeyboardButton("⬅️ Back", callback_data=f"movie_back:{imdb_id}")]]
                 ),
@@ -3107,7 +3126,8 @@ async def movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await query.edit_message_caption(
-            caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup
+            caption=caption, parse_mode=PyroParseMode.HTML
+, reply_markup=markup
         )
 
 
@@ -4399,14 +4419,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if count < 3:
                     await update.effective_chat.send_message(
                         f"{reason_text}warned ({count}/3).\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
-                        parse_mode=ParseMode.HTML,
+                        parse_mode=PyroParseMode.HTML
+,
                     )
                 else:
                     try:
                         await message.chat.ban_member(sender_id)
                         await update.effective_chat.send_message(
                             f"{reason_text}banned after 3 warnings.\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
-                            parse_mode=ParseMode.HTML,
+                            parse_mode=PyroParseMode.HTML
+,
                         )
                         warnings[sender_id] = 0
                     except Exception as e:
@@ -4448,7 +4470,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                     await update.effective_chat.send_message(
                         f"{reason_text}has been {mute_type}.\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
-                        parse_mode=ParseMode.HTML,
+                        parse_mode=PyroParseMode.HTML
+,
                     )
                 except Exception as e:
                     await update.effective_chat.send_message(f"Failed to mute user: {e}")
@@ -4458,7 +4481,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await message.chat.ban_member(sender_id)
                     await update.effective_chat.send_message(
                         f"{reason_text}banned.\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
-                        parse_mode=ParseMode.HTML,
+                        parse_mode=PyroParseMode.HTML
+,
                     )
                 except Exception as e:
                     await update.effective_chat.send_message(f"Failed to ban user: {e}")
@@ -4469,7 +4493,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await message.chat.unban_member(sender_id)
                     await update.effective_chat.send_message(
                         f"{reason_text}kicked.\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
-                        parse_mode=ParseMode.HTML,
+                        parse_mode=PyroParseMode.HTML
+,
                     )
                 except Exception as e:
                     await update.effective_chat.send_message(f"Failed to kick user: {e}")
@@ -4477,7 +4502,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif action == "delete":
                 await update.effective_chat.send_message(
                     f"Deleted message from {reason_text}\nReason: used blacklisted {triggered_type} \"{triggered_value}\"",
-                    parse_mode=ParseMode.HTML,
+                    parse_mode=PyroParseMode.HTML
+,
                 )
 
     # === AFK Logic ===
@@ -4758,7 +4784,8 @@ async def send_waifu_photo(update, context, user_id: int, partner_id: int):
                     chat_id=chat_id,
                     photo=photo_io,
                     caption=caption,
-                    parse_mode=ParseMode.HTML,
+                    parse_mode=PyroParseMode.HTML
+,
                 )
                 return
             except Exception as e:
@@ -4766,7 +4793,8 @@ async def send_waifu_photo(update, context, user_id: int, partner_id: int):
                     f"Failed to send photo, sending text only.\n{e}"
                 )
 
-    await bot.send_message(chat_id=chat_id, text=caption, parse_mode=ParseMode.HTML)
+    await bot.send_message(chat_id=chat_id, text=caption, parse_mode=PyroParseMode.HTML
+)
 
 
 async def waifu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5719,7 +5747,8 @@ async def pp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await message.reply_text(
         f"Looks like:\n{safe_description}",
         reply_markup=buttons,
-        parse_mode=ParseMode.HTML
+        parse_mode=PyroParseMode.HTML
+
     )
 
     os.remove(file_path)
@@ -6238,7 +6267,8 @@ async def send_goodbye(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "text" in msg_data:
         await update.message.reply_text(
             replace_vars(msg_data["text"]),
-            parse_mode=ParseMode.HTML
+            parse_mode=PyroParseMode.HTML
+
         )
     else:
         try:
@@ -6247,7 +6277,8 @@ async def send_goodbye(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from_chat_id=chat_id,
                 message_id=msg_data["message_id"],
                 caption=replace_vars(msg_data.get("caption", "")) if msg_data.get("caption") else None,
-                parse_mode=ParseMode.HTML
+                parse_mode=PyroParseMode.HTML
+
             )
         except Exception as e:
             await update.message.reply_text(f"⚠️ Failed to send goodbye message: {e}")
@@ -6377,7 +6408,8 @@ async def captcha_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
             kb = _build_9_options_keyboard(chat_id, user_id, correct)
             await query.edit_message_text(
                 f"❌ Wrong. {remaining} attempt(s) left.\n\n<b>{state['question']} = ?</b>",
-                parse_mode=ParseMode.HTML,
+                parse_mode=PyroParseMode.HTML
+,
                 reply_markup=kb
             )
 
