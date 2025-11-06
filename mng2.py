@@ -968,17 +968,19 @@ async def zombies(client, message):
     ids_str = ", ".join(str(uid) for uid in sorted(deleted_ids))
     await message.reply_text(f"Deleted accounts: {ids_str}\nTotal: {len(deleted_ids)}")
 
-
-# === Stone Paper Scissors Game ===
-import asyncio, random
-from pyrogram.types import InlineKeyboardMarkup as PyroInlineKeyboardMarkup, InlineKeyboardButton as PyroInlineKeyboardButton
+# ==============================
+# 🎮 ROCK PAPER SCISSORS GAME
+# ==============================
+from pyrogram.enums import ParseMode
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+import random, asyncio, secrets
 
 rps_games = {}
 
-def rps_mention(uid, name):
-    return f"[{name}](tg://user?id={uid})"
+def mention(uid, name):
+    return f"<a href='tg://user?id={uid}'>{name}</a>"
 
-def rps_result(c1, c2):
+def result(c1, c2):
     if c1 == c2:
         return "draw"
     if (c1 == "stone" and c2 == "scissor") or \
@@ -987,46 +989,40 @@ def rps_result(c1, c2):
         return "p1"
     return "p2"
 
-
-# === Inline Keyboards ===
-def rps_main_menu(game_key):
-    return PyroInlineKeyboardMarkup([
+def main_menu(game_key):
+    return InlineKeyboardMarkup([
         [
-            PyroInlineKeyboardButton("Play with Bot", callback_data=f"rps:modebot:{game_key}"),
-            PyroInlineKeyboardButton("Play with Player", callback_data=f"rps:modeplayer:{game_key}")
+            InlineKeyboardButton("Play with Bot", callback_data=f"rps:modebot:{game_key}"),
+            InlineKeyboardButton("Play with Player", callback_data=f"rps:modeplayer:{game_key}")
         ]
     ])
 
-def rps_mode_keyboard(game_key, mode_type):
-    return PyroInlineKeyboardMarkup([
+def mode_keyboard(game_key, mode_type):
+    return InlineKeyboardMarkup([
         [
-            PyroInlineKeyboardButton("Best of 3", callback_data=f"rps:{mode_type}_3:{game_key}"),
-            PyroInlineKeyboardButton("Best of 5", callback_data=f"rps:{mode_type}_5:{game_key}")
+            InlineKeyboardButton("Best of 3", callback_data=f"rps:{mode_type}_3:{game_key}"),
+            InlineKeyboardButton("Best of 5", callback_data=f"rps:{mode_type}_5:{game_key}")
         ]
     ])
 
-def rps_join_keyboard(game_key):
-    return PyroInlineKeyboardMarkup([
-        [PyroInlineKeyboardButton("Join Game", callback_data=f"rps:join:{game_key}")]
-    ])
+def join_keyboard(game_key):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("Join Game", callback_data=f"rps:join:{game_key}")]])
 
-def rps_choice_keyboard(game_key):
-    return PyroInlineKeyboardMarkup([
+def choice_keyboard(game_key):
+    return InlineKeyboardMarkup([
         [
-            PyroInlineKeyboardButton("Stone", callback_data=f"rps:stone:{game_key}"),
-            PyroInlineKeyboardButton("Paper", callback_data=f"rps:paper:{game_key}"),
-            PyroInlineKeyboardButton("Scissor", callback_data=f"rps:scissor:{game_key}"),
-            PyroInlineKeyboardButton("Random", callback_data=f"rps:random:{game_key}")
+            InlineKeyboardButton("Stone", callback_data=f"rps:stone:{game_key}"),
+            InlineKeyboardButton("Paper", callback_data=f"rps:paper:{game_key}"),
+            InlineKeyboardButton("Scissor", callback_data=f"rps:scissor:{game_key}"),
+            InlineKeyboardButton("Random", callback_data=f"rps:random:{game_key}")
         ]
     ])
 
-
-# === /rps command ===
-@pyro_client.on_message(pyro_filters.command("rps"))
+@pyro_client.on_message(filters.command("rps"))
 async def rps_start(client, message):
     chat_id = message.chat.id
     host_id = message.from_user.id
-    game_key = f"{chat_id}:{host_id}"
+    game_key = secrets.token_hex(4)
 
     rps_games[game_key] = {
         "chat_id": chat_id,
@@ -1041,204 +1037,109 @@ async def rps_start(client, message):
         "msg_id": None
     }
 
-    sent = await client.send_message(
-        chat_id,
-        "**_Choose your game type:_**",
-        reply_markup=rps_main_menu(game_key),
-        parse_mode=None
+    sent = await message.reply_text(
+        "<b><i><u>Choose your game type:</u></i></b>",
+        reply_markup=main_menu(game_key),
+        parse_mode=ParseMode.HTML
     )
     rps_games[game_key]["msg_id"] = sent.id
 
-
-# === Mode selection ===
-@pyro_client.on_callback_query(pyro_filters.regex(r"^rps:modebot:"))
+@pyro_client.on_callback_query(filters.regex("rps:modebot"))
 async def rps_modebot_menu(client, query):
+    await query.answer()
     game_key = query.data.split(":")[-1]
     game = rps_games.get(game_key)
-    if not game:
-        return
+    if not game: return
     game["type"] = "bot"
     await query.message.edit_text(
-        "_Select your round mode:_",
-        reply_markup=rps_mode_keyboard(game_key, "bot"),
-        parse_mode=None
+        "<i><u>Select your round mode:</u></i>",
+        reply_markup=mode_keyboard(game_key, "bot"),
+        parse_mode=ParseMode.HTML
     )
 
-
-@pyro_client.on_callback_query(pyro_filters.regex(r"^rps:modeplayer:"))
+@pyro_client.on_callback_query(filters.regex("rps:modeplayer"))
 async def rps_modeplayer_menu(client, query):
+    await query.answer()
     game_key = query.data.split(":")[-1]
     game = rps_games.get(game_key)
-    if not game:
-        return
+    if not game: return
     game["type"] = "player"
     await query.message.edit_text(
-        "_Select your game mode:_",
-        reply_markup=rps_mode_keyboard(game_key, "player"),
-        parse_mode=None
+        "<i><u>Select your game mode:</u></i>",
+        reply_markup=mode_keyboard(game_key, "player"),
+        parse_mode=ParseMode.HTML
     )
 
-
-# === Play with BOT ===
-@pyro_client.on_callback_query(pyro_filters.regex("^rps:bot_"))
+@pyro_client.on_callback_query(filters.regex(r"^rps:bot_\d+:.+"))
 async def rps_start_botgame(client, query):
     _, mode_str, game_key = query.data.split(":")
     game = rps_games.get(game_key)
-    if not game:
-        return
+    if not game: return
     game["mode"] = int(mode_str.split("_")[1])
     game["type"] = "bot"
     game["player2_id"] = 0
     game["player2_name"] = "Bot"
-
-    for i in range(5, 0, -1):
-        await query.message.edit_text(
-            f"**_Bot is ready!_**\n_Game starts in_ **{i}**…",
-            parse_mode=None
-        )
+    for i in range(3, 0, -1):
+        await query.message.edit_text(f"<b><i>Bot ready!</i></b>\n\n<b><i><u>Starting in<b><i><u> <b>{i}</b>…", parse_mode=ParseMode.HTML)
         await asyncio.sleep(1)
+    await start_round(client, game_key)
 
-    await rps_start_round(client, game_key)
-
-
-# === Play with Player ===
-@pyro_client.on_callback_query(pyro_filters.regex("^rps:player_"))
+@pyro_client.on_callback_query(filters.regex(r"^rps:player_\d+:.+"))
 async def rps_prepare_playergame(client, query):
     _, mode_str, game_key = query.data.split(":")
     game = rps_games.get(game_key)
-    if not game:
-        return
+    if not game: return
     game["mode"] = int(mode_str.split("_")[1])
     game["type"] = "player"
+    host = mention(game["host_id"], game["host_name"])
+    txt = (
+        f"<b><i><u>Game created by</u></i></b> {host}\n"
+        f"<b>Players:</b>\n1️⃣ {host}\n2️⃣ <i>Waiting...</i>\n"
+        f"<u>Invite someone to join:</u>"
+    )
+    await query.message.edit_text(txt, reply_markup=join_keyboard(game_key), parse_mode=ParseMode.HTML)
 
-    host = rps_mention(game["host_id"], game["host_name"])
-    join_btn = rps_join_keyboard(game_key)
-    txt = f"**Game created by** {host}\n\n**Players:**\n1) {host}\n2) _Waiting..._\n\n_Invite someone to join by pressing Join Game_"
-    await query.message.edit_text(txt, reply_markup=join_btn, parse_mode=None)
-
-
-@pyro_client.on_callback_query(pyro_filters.regex("^rps:join:"))
+@pyro_client.on_callback_query(filters.regex(r"^rps:join:.+"))
 async def rps_join_game(client, query):
     game_key = query.data.split(":")[-1]
-
     game = rps_games.get(game_key)
-    if not game:
-        return
+    if not game: return
     if query.from_user.id == game["host_id"]:
         return await query.answer("You're the host!", show_alert=True)
     if game["player2_id"]:
         return await query.answer("Someone already joined!", show_alert=True)
-
     game["player2_id"] = query.from_user.id
     game["player2_name"] = query.from_user.first_name
-
-    host = rps_mention(game["host_id"], game["host_name"])
-    p2 = rps_mention(game["player2_id"], game["player2_name"])
-
-    for i in range(5, 0, -1):
+    host = mention(game["host_id"], game["host_name"])
+    p2 = mention(game["player2_id"], game["player2_name"])
+    for i in range(3, 0, -1):
         await query.message.edit_text(
-            f"_Game starting in_ **{i}**…\n\n**Players:**\n1) {host}\n2) {p2}",
-            parse_mode=None
+            f"<b><i><u>Game starting in {i}...</u></i></b>\n"
+            f"<b>Players:</b>\n1️⃣ {host}\n2️⃣ {p2}",
+            parse_mode=ParseMode.HTML
         )
         await asyncio.sleep(1)
+    await start_round(client, game_key)
 
-    await rps_start_round(client, game_key)
-
-
-# === Round Logic ===
-async def rps_start_round(client, game_key):
+async def start_round(client, game_key):
     game = rps_games.get(game_key)
-    if not game:
-        return
-
+    if not game: return
     game["choices"] = {}
-    host = rps_mention(game["host_id"], game["host_name"])
-    p2 = rps_mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "**_Bot_**"
-
+    host = mention(game["host_id"], game["host_name"])
+    p2 = mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "<b>Bot</b>"
     text = (
-        f"**Round Starting!**\n\n"
-        f"**Scores:** `{game['scores']['p1']} - {game['scores']['p2']}`\n\n"
-        f"**Players:**\n1) {host}\n2) {p2}\n\n"
-        f"_Make your choice below!_"
+        "<b><i><u>Round Start!</u></i></b>\n\n"
+        f"<b>Score:</b> <code>{game['scores']['p1']} - {game['scores']['p2']}</code>\n\n"
+        f"<b>Players:</b>\n1. {host}\n2. {p2}\n\n"
+        "<i><u>Make your choice below:</u></i>"
     )
     await client.edit_message_text(
-        game["chat_id"],
-        game["msg_id"],
-        text,
-        reply_markup=rps_choice_keyboard(game_key),
-        parse_mode=None
+        chat_id=game["chat_id"],
+        message_id=game["msg_id"],
+        text=text,
+        reply_markup=choice_keyboard(game_key),
+        parse_mode=ParseMode.HTML
     )
-
-
-# === Choice Handling ===
-@pyro_client.on_callback_query(pyro_filters.regex("^rps:(stone|paper|scissor|random):"))
-async def rps_choice(client, query):
-    _, choice, game_key = query.data.split(":")
-    game = rps_games.get(game_key)
-    if not game:
-        return
-
-    user_id = query.from_user.id
-    if game["type"] == "player" and user_id not in [game["host_id"], game["player2_id"]]:
-        return await query.answer("You're not in this game!", show_alert=True)
-    if game["type"] == "bot" and user_id != game["host_id"]:
-        return await query.answer("Only the player can choose!", show_alert=True)
-
-    player = "p1" if user_id == game["host_id"] else "p2"
-
-    if player in game["choices"]:
-        return await query.answer("You already picked!", show_alert=True)
-
-    if choice == "random":
-        choice = random.choice(["stone", "paper", "scissor"])
-        await query.answer(f"You got {choice.capitalize()}!", show_alert=True)
-    else:
-        await query.answer(f"You chose {choice.capitalize()} ✅")
-
-    game["choices"][player] = choice
-
-    if game["type"] == "bot":
-        game["choices"]["p2"] = random.choice(["stone", "paper", "scissor"])
-        await asyncio.sleep(1)
-
-    if len(game["choices"]) == 2:
-        c1, c2 = game["choices"]["p1"], game["choices"]["p2"]
-        res = rps_result(c1, c2)
-
-        host = rps_mention(game["host_id"], game["host_name"])
-        p2 = rps_mention(game["player2_id"], game["player2_name"]) if game["type"] == "player" else "**_Bot_**"
-
-        txt = f"{host} _played_ **{c1.capitalize()}**\n{p2} _played_ **{c2.capitalize()}**\n\n"
-
-        if res == "draw":
-            txt += "**_It's a draw!_**"
-        elif res == "p1":
-            game["scores"]["p1"] += 1
-            txt += f"**_ {host} wins this round!_**"
-        else:
-            game["scores"]["p2"] += 1
-            txt += f"**_ {p2} wins this round!_**"
-
-        await client.edit_message_text(game["chat_id"], game["msg_id"], txt, parse_mode=None)
-        await asyncio.sleep(3)
-
-        target = game["mode"] // 2 + 1
-        if game["scores"]["p1"] >= target:
-            await client.edit_message_text(
-                game["chat_id"], game["msg_id"],
-                f"**_ {host} wins the game!_**\n\n**Final Score:** `{game['scores']['p1']} - {game['scores']['p2']}`",
-                parse_mode=None
-            )
-            del rps_games[game_key]
-        elif game["scores"]["p2"] >= target:
-            await client.edit_message_text(
-                game["chat_id"], game["msg_id"],
-                f"**_ {p2} wins the game!_**\n\n**Final Score:** `{game['scores']['p1']} - {game['scores']['p2']}`",
-                parse_mode=None
-            )
-            del rps_games[game_key]
-        else:
-            await rps_start_round(client, game_key)
 
 
 @pyro_client.on_message(pyro_filters.command("rzombies"))
@@ -6876,4 +6777,3 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
