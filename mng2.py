@@ -6661,7 +6661,422 @@ async def restrict_stickers(client, message):
             pass
 
 
+def mention(uid: int, name: str) -> str:
+    safe = html.escape(name or "User")
+    return f"<a href='tg://user?id={uid}'>{safe}</a>"
 
+def mk_join_markup(chat_id: int, host_id: int):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(" Join", callback_data=f"join:{chat_id}:{host_id}")],
+        [InlineKeyboardButton(" Cancel", callback_data=f"cancel:{chat_id}:{host_id}")]
+    ])
+
+def mk_toss_markup(chat_id: int, host_id: int):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(" Heads", callback_data=f"toss:{chat_id}:{host_id}:heads"),
+         InlineKeyboardButton(" Tails", callback_data=f"toss:{chat_id}:{host_id}:tails")]
+    ])
+
+def mk_bat_bowl_markup(chat_id: int, chooser_id: int):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(" Bat", callback_data=f"choose:{chat_id}:{chooser_id}:bat"),
+         InlineKeyboardButton(" Bowl", callback_data=f"choose:{chat_id}:{chooser_id}:bowl")]
+    ])
+
+def mk_run_buttons(chat_id: int):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(str(i), callback_data=f"run:{chat_id}:{i}") for i in range(1, 4)],
+        [InlineKeyboardButton(str(i), callback_data=f"run:{chat_id}:{i}") for i in range(4, 7)]
+    ])
+
+
+# === STATE ===
+games: Dict[int, Dict[str, Any]] = {}
+
+# === HELPERS ===
+def format_scoreboard(g: Dict[str, Any]) -> str:
+    p1, p2 = g["players"]
+    s1 = g["score"].get(p1, {"runs":0,"balls":0})
+    s2 = g["score"].get(p2, {"runs":0,"balls":0})
+    return (
+        f"{mention(p1, g['player_names'][p1])}: <b>{s1['runs']}</b> ({s1['balls']})\n"
+        f"{mention(p2, g['player_names'][p2])}: <b>{s2['runs']}</b> ({s2['balls']})"
+    )
+
+async def end_game(chat_id: int, final_text: str):
+    """Edit final message and remove state using global app."""
+    g = games.get(chat_id)
+    if not g:
+        return
+    try:
+        await app.edit_message_text(
+            chat_id=chat_id,
+            message_id=g["message_id"],
+            text=final_text,
+            parse_mode=ParseMode.HTML
+        )
+    except Exception:
+        pass
+    games.pop(chat_id, None)
+
+
+# === COMMANDS ===
+@app.on_message(filters.command("Cric") & filters.group)
+async def start_game(_, m: Message):
+    chat_id = m.chat.id
+    user = m.from_user
+
+    if chat_id in games:
+        await m.reply_text(
+            "<b><i><u>❗ A game is already running in this chat.</u></i></b>\nFinish it before starting a new one.",
+            parse_mode=ParseMode.HTML)
+        return
+
+    games[chat_id] = {
+        "host_id": user.id,
+        "players": [user.id],
+        "player_names": {user.id: user.first_name or "Player"},
+        "status": "waiting",
+        "message_id": None,
+        "score": {},
+        "balls_played": 0,
+        "overs": 0,
+        "pending": {"bowler_choice": None, "batter_choice": None},
+        "innings": 1,
+        "first_innings_runs": None,
+        "target": None
+    }
+
+    host_m = mention(user.id, user.first_name or "Host")
+    txt = (
+        f"<b><i><u>🏟️ New Cricket Game Created</u></i></b>\n"
+        f"Host: {host_m}\n\n"
+        f"<b>Players —</b>\n1. {host_m}\n2. <i><u>Waiting for player...</u></i>\n\n"
+        f"<i>Host, click 'Join' to enter the match or wait for another to join.</i>"
+    )
+    sent = await m.reply_text(txt, reply_markup=mk_join_markup(chat_id, user.id), parse_mode=ParseMode.HTML)
+    games[chat_id]["message_id"] = sent.id
+
+# === CALLBACKS ===
+@app.on_callback_query()
+async def callbacks(_, q: CallbackQuery):
+    data = q.data or ""
+    if data.startswith("join:"): await join_game(q)
+    elif data.startswith("cancel:"): await cancel_game(q)
+    elif data.startswith("toss:"): await toss_coin(q)
+    elif data.startswith("choose:"): await choose_option(q)
+    elif data.startswith("run:"): await handle_run(q)
+    else: await q.answer()
+
+async def join_game(q: CallbackQuery):
+    _, chat_s, host_s = q.data.split(":")
+    chat_id, host_id = int(chat_s), int(host_s)
+    user = q.from_user
+
+    if chat_id not in games:
+        return await q.answer("No active game.", show_alert=True)
+    g = games[chat_id]
+    if len(g["players"]) >= 2:
+        return await q.answer("Game already has 2 players.", show_alert=True)
+    if user.id in g["players"]:
+        return await q.answer("You're already in the game.")
+
+    g["players"].append(user.id)
+    g["player_names"][user.id] = user.first_name or "Player"
+    for pid in g["players"]:
+        g["score"].setdefault(pid, {"runs":0, "balls":0})
+
+    p1, p2 = [mention(pid, g["player_names"][pid]) for pid in g["players"]]
+
+    txt = (
+        f"<b><i><u>🏟️ Cricket Game Ready</u></i></b>\n"
+        f"<b>Players —</b>\n1. {p1}\n2. {p2}\n\n"
+        f"<i>Host, choose <b>Heads</b> or <b>Tails</b> to start the toss.</i>"
+    )
+    try:
+        await q.message.edit_text(txt, reply_markup=mk_toss_markup(chat_id, g["host_id"]), parse_mode=ParseMode.HTML)
+    except Exception:
+        pass
+    await q.answer("You joined ✅")
+
+async def cancel_game(q: CallbackQuery):
+    _, chat_s, host_s = q.data.split(":")
+    chat_id, host_id = int(chat_s), int(host_s)
+    user = q.from_user
+    if chat_id not in games:
+        return await q.answer("No active game.")
+    g = games[chat_id]
+    if user.id != g["host_id"]:
+        return await q.answer("Only host can cancel.", show_alert=True)
+    try:
+        await q.message.edit_text("<b><i><u>❌ Game cancelled by host.</u></i></b>", parse_mode=ParseMode.HTML)
+    except Exception:
+        pass
+    del games[chat_id]
+    await q.answer("Game cancelled.")
+
+async def toss_coin(q: CallbackQuery):
+    _, chat_s, host_s, call = q.data.split(":")
+    chat_id, host_id = int(chat_s), int(host_s)
+    user = q.from_user
+    if chat_id not in games:
+        return await q.answer("No active game.")
+    g = games[chat_id]
+    if user.id != g["host_id"]:
+        return await q.answer("Only host can toss.", show_alert=True)
+    if len(g["players"]) < 2:
+        return await q.answer("Need 2 players.", show_alert=True)
+
+    flip = random.choice(["heads", "tails"])
+    p1, p2 = g["players"]
+    host = p1
+    other = p2
+    winner = host if call == flip else other
+
+    txt = (
+        f"<b><i><u>🪙 Toss Result</u></i></b>\n"
+        f"Host called: <b>{call.title()}</b> — Result: <b>{flip.title()}</b>\n\n"
+        f"Winner: {mention(winner, g['player_names'][winner])}\n\n"
+        f"<i>{mention(winner, g['player_names'][winner])} — choose to <b>Bat</b> or <b>Bowl</b>.</i>"
+    )
+    g["chooser_id"] = winner
+    try:
+        await q.message.edit_text(txt, reply_markup=mk_bat_bowl_markup(chat_id, winner), parse_mode=ParseMode.HTML)
+    except Exception:
+        pass
+    await q.answer()
+
+async def choose_option(q: CallbackQuery):
+    _, chat_s, chooser_s, pick = q.data.split(":")
+    chat_id, chooser_id = int(chat_s), int(chooser_s)
+    user = q.from_user
+    if chat_id not in games:
+        return await q.answer("No active game.")
+    g = games[chat_id]
+    if user.id != chooser_id:
+        return await q.answer("Only the toss winner can choose.", show_alert=True)
+
+    p1, p2 = g["players"]
+    if pick == "bat":
+        batting = chooser_id
+        bowling = p1 if chooser_id == p2 else p2
+    else:
+        bowling = chooser_id
+        batting = p1 if chooser_id == p2 else p2
+
+    for pid in g["players"]:
+        g["score"].setdefault(pid, {"runs":0, "balls":0})
+
+    # reset/initialize match counters
+    g.update({
+        "status": "playing",
+        "current_batter": batting,
+        "current_bowler": bowling,
+        "balls_played": 0,
+        "overs": 0,
+        "pending": {"bowler_choice": None, "batter_choice": None},
+        "innings": 1,
+        "first_innings_runs": None,
+        "target": None
+    })
+
+    txt = (
+        f"<b><i><u>🏏 Match Start</u></i></b>\n"
+        f"Over- <b>0.0</b>\n\n"
+        f"<b>Batter</b> - {mention(batting, g['player_names'][batting])}\n"
+        f"<b>Bowler</b> - {mention(bowling, g['player_names'][bowling])}\n\n"
+        f"<i>Bowler, choose a number (1-6). Then Batter will select a number.</i>"
+    )
+    try:
+        await q.message.edit_text(txt, reply_markup=mk_run_buttons(chat_id), parse_mode=ParseMode.HTML)
+    except Exception:
+        pass
+    await q.answer()
+
+async def handle_run(q: CallbackQuery):
+    _, chat_s, num_s = q.data.split(":")
+    chat_id, num = int(chat_s), int(num_s)
+    user = q.from_user
+
+    if chat_id not in games:
+        return await q.answer("No active game.")
+    g = games[chat_id]
+    if g.get("status") != "playing":
+        return await q.answer("Match not in progress.", show_alert=True)
+
+    batter = g["current_batter"]
+    bowler = g["current_bowler"]
+    pending = g["pending"]
+
+    if user.id not in g["players"]:
+        return await q.answer("You are not a player in this game.", show_alert=True)
+
+    # Bowler chooses first
+    if user.id == bowler:
+        if pending["bowler_choice"] is None:
+            pending["bowler_choice"] = num
+            await q.answer("Bowler choice recorded.")
+            # Immediate edit: prompt batter (DO NOT reveal bowler number)
+            over_text = f"{g['overs']}.{g['balls_played']%6}"
+            txt = (
+                f"<b><i><u>⏳ Waiting for Batter</u></i></b>\n"
+                f"Over- <b>{over_text}</b>\n\n"
+                f"<b>Batter</b> - {mention(batter, g['player_names'][batter])}\n"
+                f"<b>Bowler</b> - {mention(bowler, g['player_names'][bowler])}\n\n"
+                f"<i>Bowler has chosen — {mention(batter, g['player_names'][batter])}, please select a number (1-6).</i>"
+            )
+            try:
+                await q.message.edit_text(txt, reply_markup=mk_run_buttons(chat_id), parse_mode=ParseMode.HTML)
+            except Exception:
+                pass
+        else:
+            await q.answer("Bowler already chose.", show_alert=True)
+        return
+
+    # Batter chooses (only after bowler)
+    if user.id == batter:
+        if pending["bowler_choice"] is None:
+            await q.answer("Wait for the bowler to choose first.", show_alert=True)
+            return
+        if pending["batter_choice"] is None:
+            pending["batter_choice"] = num
+            await q.answer("Batter choice recorded.")
+        else:
+            await q.answer("Batter already chose.", show_alert=True)
+    else:
+        await q.answer("Not your turn.", show_alert=True)
+        return
+
+    # Resolve if both chosen
+    if pending["bowler_choice"] is not None and pending["batter_choice"] is not None:
+        bc = pending["bowler_choice"]
+        bac = pending["batter_choice"]
+
+        # Update ball counters
+        g["balls_played"] += 1
+        g["score"][batter]["balls"] += 1
+        if g["balls_played"] % 6 == 0:
+            g["overs"] += 1
+
+        # WICKET handling
+        if bc == bac:
+            # If this was first innings -> set first_innings_runs, target and switch to innings 2
+            if g["innings"] == 1:
+                g["first_innings_runs"] = g["score"][batter]["runs"]
+                g["target"] = g["first_innings_runs"] + 1
+
+                # Build innings-break message (include bowler choice explicitly)
+                next_batter = [p for p in g["players"] if p != batter][0]
+                next_bowler = batter
+
+                result_txt = (
+                    f"<b><i><u>💥 WICKET! — Innings Break</u></i></b>\n"
+                    f"Bowler chose: <b>{bc}</b> — Batter chose: <b>{bac}</b>\n\n"
+                    f"{mention(batter, g['player_names'][batter])} is <b>OUT</b>.\n\n"
+                    f"<b>First innings:</b> {mention(batter, g['player_names'][batter])} scored <b>{g['first_innings_runs']}</b>.\n"
+                    f"<b>Target for {mention(next_batter, g['player_names'][next_batter])}:</b> <b>{g['target']}</b> to win (equal <b>{g['first_innings_runs']}</b> to draw).\n\n"
+                    f"<i>Now innings 2 begins. {mention(next_batter, g['player_names'][next_batter])} will bat.</i>\n"
+                    f"<i>{mention(next_bowler, g['player_names'][next_bowler])}, choose a number to bowl (1–6).</i>"
+                )
+
+
+                # Reset overs/balls for innings 2
+                g["innings"] = 2
+                g["current_batter"] = next_batter
+                g["current_bowler"] = next_bowler
+                g["balls_played"] = 0
+                g["overs"] = 0
+                g["pending"] = {"bowler_choice": None, "batter_choice": None}
+
+                try:
+                    await q.message.edit_text(result_txt, reply_markup=mk_run_buttons(chat_id), parse_mode=ParseMode.HTML)
+                except Exception:
+                    pass
+                return
+
+            else:
+                # innings 2 wicket -> determine final result
+                chasing_runs = g["score"][batter]["runs"]
+                first = g["first_innings_runs"] or 0
+                if chasing_runs >= g.get("target", first+1):
+                    final_txt = (
+                        f"<b><i><u>🏆 Match Finished</u></i></b>\n"
+                        f"{mention(batter, g['player_names'][batter])} reached the target and wins!\n\n"
+                        f"Final Score:\n{format_scoreboard(g)}"
+                    )
+                else:
+                    if chasing_runs == first:
+                        final_txt = (
+                            f"<b><i><u>🤝 Match Drawn</u></i></b>\n"
+                            f"{mention(batter, g['player_names'][batter])} finished with <b>{chasing_runs}</b> (same as first innings).\n\n"
+                            f"Final Score:\n{format_scoreboard(g)}"
+                        )
+                    else:
+                        winner = [p for p in g["players"] if p != batter][0]
+                        final_txt = (
+                            f"<b><i><u>❌ Chasing Failed — Match Over</u></i></b>\n"
+                            f"{mention(batter, g['player_names'][batter])} is OUT with <b>{chasing_runs}</b>.\n\n"
+                            f"{mention(winner, g['player_names'][winner])} wins!\n\n"
+                            f"Final Score:\n{format_scoreboard(g)}"
+                        )
+                await end_game(chat_id, final_txt)
+                return
+
+        else:
+            # Runs scored
+            runs = bac
+            g["score"][batter]["runs"] += runs
+
+            # If innings 2 chasing, check for immediate win
+            if g["innings"] == 2 and g.get("target") is not None:
+                if g["score"][batter]["runs"] >= g["target"]:
+                    final_txt = (
+                        f"<b><i><u>🏆 Target Achieved — Match Finished</u></i></b>\n"
+                        f"{mention(batter, g['player_names'][batter])} scores <b>{runs}</b> and reaches <b>{g['score'][batter]['runs']}</b> — target <b>{g['target']}</b>.\n\n"
+                        f"{mention(batter, g['player_names'][batter])} wins!\n\n"
+                        f"Final Score:\n{format_scoreboard(g)}"
+                    )
+                    await end_game(chat_id, final_txt)
+
+                    return
+
+        # Reset pending for next ball
+        g["pending"] = {"bowler_choice": None, "batter_choice": None}
+
+        # Build result message for the ball
+        if bc == bac:
+            result_msg = (
+                f"<b><i><u>💥 WICKET!</u></i></b>\n"
+                f"Bowler chose: <b>{bc}</b> — Batter chose: <b>{bac}</b>\n"
+                f"{mention(batter, g['player_names'][batter])} is OUT.\n\n"
+            )
+        else:
+            result_msg = (
+                f"<b><i><u>🏃 Runs!</u></i></b>\n"
+                f"Bowler chose: <b>{bc}</b> — Batter chose: <b>{bac}</b>\n"
+                f"{mention(batter, g['player_names'][batter])} scores <b>{runs}</b> runs.\n\n"
+            )
+
+        over = f"{g['overs']}.{g['balls_played']%6}"
+
+        target_info = ""
+        if g["innings"] == 2 and g.get("target") is not None:
+            target_info = f"<b>Target:</b> <b>{g['target']}</b>\n\n"
+
+        txt = (
+            result_msg +
+            f"Over- <b>{over}</b>\n\n"
+            f"{target_info}"
+            f"<b>Batter</b> - {mention(g['current_batter'], g['player_names'][g['current_batter']])}\n"
+            f"<b>Bowler</b> - {mention(g['current_bowler'], g['player_names'][g['current_bowler']])}\n\n"
+            f"<b>Scoreboard</b>\n{format_scoreboard(g)}\n\n"
+            f"<i>Bowler, choose a number (1-6). Then Batter will select a number.</i>"
+        )
+
+        try:
+            await q.message.edit_text(txt, reply_markup=mk_run_buttons(chat_id), parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
 
 # === ENFORCE STICKER & GIF RESTRICTION ===
 @pyro_client.on_message(pyro_filters.sticker | pyro_filters.animation)
@@ -6875,3 +7290,4 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
