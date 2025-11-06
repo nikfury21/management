@@ -6863,13 +6863,16 @@ async def select_mode(q: CallbackQuery):
         )
 
         try:
-            await q.message.edit_text(
-                txt,
+            await pyro_client.edit_message_text(
+                chat_id=chat_id,
+                message_id=g["message_id"],
+                text=txt,
                 reply_markup=mk_run_buttons(chat_id),
                 parse_mode=PyroParseMode.HTML
             )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[BotMode Edit Error] {e}")
+
         await q.answer("Bot mode selected ✅")
 
 
