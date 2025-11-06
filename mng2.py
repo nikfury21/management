@@ -113,6 +113,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 from datetime import datetime, timezone
 from html import escape 
+# Ensure Pyrogram's own button classes are used for RPS
+from pyrogram.types import InlineKeyboardMarkup as PyroInlineKeyboardMarkup, InlineKeyboardButton as PyroInlineKeyboardButton
+
 def boldify(text: str) -> str:
     return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
 
@@ -1048,7 +1051,8 @@ async def rps_start(client, message):
 
 
 # === Mode selection ===
-@pyro_client.on_callback_query(pyro_filters.regex("^rps:modebot:"))
+@pyro_client.on_callback_query(pyro_filters.regex(r"^rps:modebot"))
+
 async def rps_modebot_menu(client, query):
     game_key = query.data.split(":")[-1]
 
