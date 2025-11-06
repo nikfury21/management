@@ -23,7 +23,9 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-
+# add near other pyrogram imports
+from pyrogram.types import CallbackQuery, InlineKeyboardButton as PyroButton, InlineKeyboardMarkup as PyroMarkup
+from pyrogram.enums import ParseMode as PyroParseMode
 from telegram.constants import ParseMode
 from telethon import TelegramClient
 from telegram import ChatPermissions as PTBChatPermissions
@@ -6667,28 +6669,29 @@ def mention(uid: int, name: str) -> str:
     return f"<a href='tg://user?id={uid}'>{safe}</a>"
 
 def mk_join_markup(chat_id: int, host_id: int):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(" Join", callback_data=f"join:{chat_id}:{host_id}")],
-        [InlineKeyboardButton(" Cancel", callback_data=f"cancel:{chat_id}:{host_id}")]
+    return PyroMarkup([
+        [PyroButton(" Join", callback_data=f"join:{chat_id}:{host_id}")],
+        [PyroButton(" Cancel", callback_data=f"cancel:{chat_id}:{host_id}")]
     ])
 
 def mk_toss_markup(chat_id: int, host_id: int):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(" Heads", callback_data=f"toss:{chat_id}:{host_id}:heads"),
-         InlineKeyboardButton(" Tails", callback_data=f"toss:{chat_id}:{host_id}:tails")]
+    return PyroMarkup([
+        [PyroButton(" Heads", callback_data=f"toss:{chat_id}:{host_id}:heads"),
+         PyroButton(" Tails", callback_data=f"toss:{chat_id}:{host_id}:tails")]
     ])
 
 def mk_bat_bowl_markup(chat_id: int, chooser_id: int):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(" Bat", callback_data=f"choose:{chat_id}:{chooser_id}:bat"),
-         InlineKeyboardButton(" Bowl", callback_data=f"choose:{chat_id}:{chooser_id}:bowl")]
+    return PyroMarkup([
+        [PyroButton(" Bat", callback_data=f"choose:{chat_id}:{chooser_id}:bat"),
+         PyroButton(" Bowl", callback_data=f"choose:{chat_id}:{chooser_id}:bowl")]
     ])
 
 def mk_run_buttons(chat_id: int):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(str(i), callback_data=f"run:{chat_id}:{i}") for i in range(1, 4)],
-        [InlineKeyboardButton(str(i), callback_data=f"run:{chat_id}:{i}") for i in range(4, 7)]
+    return PyroMarkup([
+        [PyroButton(str(i), callback_data=f"run:{chat_id}:{i}") for i in range(1, 4)],
+        [PyroButton(str(i), callback_data=f"run:{chat_id}:{i}") for i in range(4, 7)]
     ])
+
 
 
 # === STATE ===
@@ -6710,11 +6713,12 @@ async def end_game(chat_id: int, final_text: str):
     if not g:
         return
     try:
-        await app.edit_message_text(
+        await pyro_client.edit_message_text(
+
             chat_id=chat_id,
             message_id=g["message_id"],
             text=final_text,
-            parse_mode=ParseMode.HTML
+            parse_mode=PyroParseMode.HTML
         )
     except Exception:
         pass
@@ -6722,7 +6726,7 @@ async def end_game(chat_id: int, final_text: str):
 
 
 # === COMMANDS ===
-@app.on_message(filters.command("Cric") & filters.group)
+@pyro_client.on_message(pyro_filters.command("Cric") & pyro_filters.group)
 async def start_game(_, m: Message):
     chat_id = m.chat.id
     user = m.from_user
@@ -6730,7 +6734,7 @@ async def start_game(_, m: Message):
     if chat_id in games:
         await m.reply_text(
             "<b><i><u>❗ A game is already running in this chat.</u></i></b>\nFinish it before starting a new one.",
-            parse_mode=ParseMode.HTML)
+            parse_mode=PyroParseMode.HTML)
         return
 
     games[chat_id] = {
@@ -6755,11 +6759,11 @@ async def start_game(_, m: Message):
         f"<b>Players —</b>\n1. {host_m}\n2. <i><u>Waiting for player...</u></i>\n\n"
         f"<i>Host, click 'Join' to enter the match or wait for another to join.</i>"
     )
-    sent = await m.reply_text(txt, reply_markup=mk_join_markup(chat_id, user.id), parse_mode=ParseMode.HTML)
+    sent = await m.reply_text(txt, reply_markup=mk_join_markup(chat_id, user.id), parse_mode=PyroParseMode.HTML)
     games[chat_id]["message_id"] = sent.id
 
 # === CALLBACKS ===
-@app.on_callback_query()
+@pyro_client.on_callback_query()
 async def callbacks(_, q: CallbackQuery):
     data = q.data or ""
     if data.startswith("join:"): await join_game(q)
@@ -6795,7 +6799,7 @@ async def join_game(q: CallbackQuery):
         f"<i>Host, choose <b>Heads</b> or <b>Tails</b> to start the toss.</i>"
     )
     try:
-        await q.message.edit_text(txt, reply_markup=mk_toss_markup(chat_id, g["host_id"]), parse_mode=ParseMode.HTML)
+        await q.message.edit_text(txt, reply_markup=mk_toss_markup(chat_id, g["host_id"]), parse_mode=PyroParseMode.HTML)
     except Exception:
         pass
     await q.answer("You joined ✅")
@@ -6810,7 +6814,7 @@ async def cancel_game(q: CallbackQuery):
     if user.id != g["host_id"]:
         return await q.answer("Only host can cancel.", show_alert=True)
     try:
-        await q.message.edit_text("<b><i><u>❌ Game cancelled by host.</u></i></b>", parse_mode=ParseMode.HTML)
+        await q.message.edit_text("<b><i><u>❌ Game cancelled by host.</u></i></b>", parse_mode=PyroParseMode.HTML)
     except Exception:
         pass
     del games[chat_id]
@@ -6842,7 +6846,7 @@ async def toss_coin(q: CallbackQuery):
     )
     g["chooser_id"] = winner
     try:
-        await q.message.edit_text(txt, reply_markup=mk_bat_bowl_markup(chat_id, winner), parse_mode=ParseMode.HTML)
+        await q.message.edit_text(txt, reply_markup=mk_bat_bowl_markup(chat_id, winner), parse_mode=PyroParseMode.HTML)
     except Exception:
         pass
     await q.answer()
@@ -6889,7 +6893,7 @@ async def choose_option(q: CallbackQuery):
         f"<i>Bowler, choose a number (1-6). Then Batter will select a number.</i>"
     )
     try:
-        await q.message.edit_text(txt, reply_markup=mk_run_buttons(chat_id), parse_mode=ParseMode.HTML)
+        await q.message.edit_text(txt, reply_markup=mk_run_buttons(chat_id), parse_mode=PyroParseMode.HTML)
     except Exception:
         pass
     await q.answer()
@@ -6927,7 +6931,7 @@ async def handle_run(q: CallbackQuery):
                 f"<i>Bowler has chosen — {mention(batter, g['player_names'][batter])}, please select a number (1-6).</i>"
             )
             try:
-                await q.message.edit_text(txt, reply_markup=mk_run_buttons(chat_id), parse_mode=ParseMode.HTML)
+                await q.message.edit_text(txt, reply_markup=mk_run_buttons(chat_id), parse_mode=PyroParseMode.HTML)
             except Exception:
                 pass
         else:
@@ -6990,7 +6994,7 @@ async def handle_run(q: CallbackQuery):
                 g["pending"] = {"bowler_choice": None, "batter_choice": None}
 
                 try:
-                    await q.message.edit_text(result_txt, reply_markup=mk_run_buttons(chat_id), parse_mode=ParseMode.HTML)
+                    await q.message.edit_text(result_txt, reply_markup=mk_run_buttons(chat_id), parse_mode=PyroParseMode.HTML)
                 except Exception:
                     pass
                 return
@@ -7075,7 +7079,7 @@ async def handle_run(q: CallbackQuery):
         )
 
         try:
-            await q.message.edit_text(txt, reply_markup=mk_run_buttons(chat_id), parse_mode=ParseMode.HTML)
+            await q.message.edit_text(txt, reply_markup=mk_run_buttons(chat_id), parse_mode=PyroParseMode.HTML)
         except Exception:
             pass
 
@@ -7291,5 +7295,4 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
