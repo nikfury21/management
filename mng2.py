@@ -141,7 +141,36 @@ BOT_TOKEN = os.getenv("MNG_BOT_TOKEN")
 GOOGLE_KEY = os.environ.get("GOOGLE_KEY")
 GOOGLE_CX  = os.environ.get("GOOGLE_CX")
 OMDB_API_KEY = os.environ.get("OMDB_KEY")
-HF_TOKEN = os.environ.get("HF_TOKEN")
+import itertools
+
+# 🔑 Multiple Hugging Face tokens (auto-rotating)
+HF_TOKENS = [
+    os.getenv("HF_TOKEN1"),
+    os.getenv("HF_TOKEN2"),
+    os.getenv("HF_TOKEN3"),
+    os.getenv("HF_TOKEN4"),
+    os.getenv("HF_TOKEN5"),
+    os.getenv("HF_TOKEN6"),
+    os.getenv("HF_TOKEN7"),
+    os.getenv("HF_TOKEN8"),
+    os.getenv("HF_TOKEN9"),
+    os.getenv("HF_TOKEN10"),
+]
+
+
+# Remove any empty (None) entries
+HF_TOKENS = [t for t in HF_TOKENS if t]
+
+if not HF_TOKENS:
+    print("⚠️ No Hugging Face tokens found in environment (HF_TOKEN1, HF_TOKEN2, etc.)")
+
+HF_TOKEN_CYCLE = itertools.cycle(HF_TOKENS)
+ROUTER_BASE = "https://router.huggingface.co/hf-inference/models/"
+
+def make_headers():
+    """Return headers using the next token in rotation."""
+    token = next(HF_TOKEN_CYCLE)
+    return {"Authorization": f"Bearer {token}"}
 
 
 pyro_client = PyroClient(
@@ -257,8 +286,6 @@ def scrape_device_specifications(query: str):
 MODEL_CANDIDATES = ["black-forest-labs/FLUX.1-dev", "stabilityai/stable-diffusion-xl-base-1.0"]
 POLLINATIONS_FALLBACK = False  # disable fallback completely
 
-HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
-ROUTER_BASE = "https://router.huggingface.co/hf-inference/models/"
 
 
 def hf_request(model_id: str, prompt: str, timeout=180):
@@ -284,7 +311,15 @@ def hf_request(model_id: str, prompt: str, timeout=180):
     }
 
     try:
-        resp = requests.post(url, headers=HEADERS, json=payload, timeout=timeout)
+        headers = make_headers()
+        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+
+        # 🔁 retry automatically if token expired
+        if resp.status_code in (401, 403):
+            print("[HF] Token expired or unauthorized — rotating key and retrying...")
+            headers = make_headers()
+            resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+
     except Exception as e:
         return False, False, f"Request failed: {e}", None
 
@@ -7513,7 +7548,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
