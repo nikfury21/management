@@ -7312,7 +7312,7 @@ async def spam_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 await send_method(chat_id=chat_id, animation=content_to_send)
 
             # ✅ Add 0.1s delay to avoid Telegram flood limits
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.14)
 
         except Exception as e:
             print(f"[Spam error #{i}] {e}")
@@ -7512,5 +7512,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
