@@ -7303,13 +7303,21 @@ async def spam_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     # NO initial or final messages, just the rapid-fire loop!
     for i in range(count):
-        # We use **kwargs because the argument name changes for different media types
-        if send_method == context.bot.send_message:
-            await send_method(chat_id=chat_id, text=content_to_send)
-        elif send_method == context.bot.send_sticker:
-            await send_method(chat_id=chat_id, sticker=content_to_send)
-        elif send_method == context.bot.send_animation:
-            await send_method(chat_id=chat_id, animation=content_to_send)
+        try:
+            if send_method == context.bot.send_message:
+                await send_method(chat_id=chat_id, text=content_to_send)
+            elif send_method == context.bot.send_sticker:
+                await send_method(chat_id=chat_id, sticker=content_to_send)
+            elif send_method == context.bot.send_animation:
+                await send_method(chat_id=chat_id, animation=content_to_send)
+
+            # ✅ Add 0.1s delay to avoid Telegram flood limits
+            await asyncio.sleep(0.1)
+
+        except Exception as e:
+            print(f"[Spam error #{i}] {e}")
+            await asyncio.sleep(0.3)  # small pause before retrying
+
 
 
 skip_updates = True
@@ -7504,5 +7512,4 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
