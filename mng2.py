@@ -321,16 +321,50 @@ def hf_request(model_id: str, prompt: str, timeout=180):
             resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
 
     except Exception as e:
+        # Send connection/request error directly to your DM
+        try:
+            from telegram import Bot
+            import asyncio
+            bot = Bot(token=os.environ.get("BOT_TOKEN"))
+            asyncio.create_task(bot.send_message(
+                chat_id=8353079084,
+                text=f"⚠️ [HF REQUEST FAILED]\nModel: {model_id}\nError: {str(e)[:1000]}"
+            ))
+        except Exception as send_err:
+            print(f"[HF ERROR REPORT SEND FAILED] {send_err}")
         return False, False, f"Request failed: {e}", None
 
     content_type = resp.headers.get("Content-Type", "")
+
     if resp.status_code == 200 and content_type.startswith("image"):
         return True, True, resp.content, resp.status_code
 
+    # --- Detailed debug logging + DM report (only DM, no console log) ---
     try:
         txt = resp.text
     except Exception:
         txt = "<no-text-response>"
+
+    debug_info = (
+        f"⚠️ [HF ERROR REPORT]\n"
+        f"Model: {model_id}\n"
+        f"Status: {resp.status_code}\n"
+        f"Headers: {dict(resp.headers)}\n"
+        f"Response:\n{txt[:1500]}"
+    )
+
+    # Send the detailed error report to your Telegram DM
+    try:
+        from telegram import Bot
+        import asyncio
+        bot = Bot(token=os.environ.get("BOT_TOKEN"))
+        asyncio.create_task(bot.send_message(
+            chat_id=8353079084,
+            text=debug_info[:4000]
+        ))
+    except Exception as send_err:
+        print(f"[HF ERROR REPORT SEND FAILED] {send_err}")
+
     return True, False, txt, resp.status_code
 
 
@@ -7548,6 +7582,5 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
