@@ -7246,6 +7246,71 @@ async def block_unfree_media(client, message):
             await message.delete()
         except Exception:
             pass
+MAX_SPAM_COUNT = 100
+
+
+async def spam_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the /spam <count> <message> command and reply spam without extra messages."""
+    
+    # Get the chat ID for sending messages
+    chat_id = update.effective_chat.id
+    
+    # 1. Parse the count argument
+    try:
+        if not context.args:
+            # We must keep this message so the user knows how to use the command if they mess up.
+            await update.message.reply_text("🚫 Usage error: /spam <count> <message> or reply to content with /spam <count>")
+            return
+        
+        # Get the count and enforce the max limit of 100
+        requested_count = int(context.args[0])
+        count = min(requested_count, MAX_SPAM_COUNT)
+        
+    except ValueError:
+        await update.message.reply_text("⚠️ Error: Count must be a number.")
+        return
+
+    # 2. Determine WHAT to send and HOW
+    
+    content_to_send = None
+    send_method = None # Stores the asynchronous function (e.g., context.bot.send_message)
+
+    # A. Case: Reply-Spam (Stickers, Gifs, Messages)
+    if update.message.reply_to_message:
+        replied_msg = update.message.reply_to_message
+        
+        if replied_msg.text:
+            content_to_send = replied_msg.text
+            send_method = context.bot.send_message
+        elif replied_msg.sticker:
+            content_to_send = replied_msg.sticker.file_id
+            send_method = context.bot.send_sticker
+        elif replied_msg.animation:
+            content_to_send = replied_msg.animation.file_id
+            send_method = context.bot.send_animation
+        
+    # B. Case: Direct Text Spam (/spam 50 hi)
+    elif len(context.args) > 1:
+        content_to_send = " ".join(context.args[1:])
+        send_method = context.bot.send_message
+    
+    # C. Handle cases where no content was found 
+    if not content_to_send:
+        await update.message.reply_text("I can't send nothing! Need text or a reply.")
+        return
+
+    # --- 3. THE LOOP: The silent strike! ---
+    
+    # NO initial or final messages, just the rapid-fire loop!
+    for i in range(count):
+        # We use **kwargs because the argument name changes for different media types
+        if send_method == context.bot.send_message:
+            await send_method(chat_id=chat_id, text=content_to_send)
+        elif send_method == context.bot.send_sticker:
+            await send_method(chat_id=chat_id, sticker=content_to_send)
+        elif send_method == context.bot.send_animation:
+            await send_method(chat_id=chat_id, animation=content_to_send)
+
 
 skip_updates = True
 
@@ -7387,6 +7452,8 @@ async def start_bots():
         application.add_handler(CommandHandler("symbol", symbol_command))
         application.add_handler(CallbackQueryHandler(font_callback, pattern=r"^(F|P|C)\|"))
         application.add_handler(CommandHandler("generate", generate))
+        application.add_handler(CommandHandler("spam", spam_handler))
+
 
 
 
@@ -7437,3 +7504,4 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
