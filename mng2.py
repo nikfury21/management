@@ -3136,13 +3136,14 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat.id,
             photo=photo_file,
             caption=message_text,
-            parse_mode=ParseMode.MARKDOWN_V2,
+            parse_mode="HTML",
+
             disable_notification=True,
         )
     else:
         await update.message.reply_text(
             text=message_text,
-            parse_mode=ParseMode.MARKDOWN_V2,
+            parse_mode="HTML",
             disable_web_page_preview=True,
             disable_notification=True,
         )
