@@ -26,7 +26,6 @@ from telegram.ext import (
 # add near other pyrogram imports
 from pyrogram.types import CallbackQuery, InlineKeyboardButton as PyroButton, InlineKeyboardMarkup as PyroMarkup
 from pyrogram.enums import ParseMode as PyroParseMode
-from telegram.constants import ParseMode
 from telethon import TelegramClient
 from telegram import ChatPermissions as PTBChatPermissions
 from telegram.helpers import escape_markdown
@@ -36,7 +35,6 @@ from telethon.tl.types import ChatParticipantAdmin, ChatParticipantCreator
 from datetime import datetime, timedelta, time as dt_time
 import time  # standard module for time.time()
 import time 
-from pyrogram.enums import ParseMode as PyroParseMode
 import io
 import asyncio
 from groq import Client
@@ -75,7 +73,6 @@ import re
 import os
 import tempfile
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 import re
 from telegram.ext import MessageHandler, ApplicationBuilder
@@ -1454,7 +1451,6 @@ async def delete_edited_message(context: ContextTypes.DEFAULT_TYPE):
 
 import asyncio
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ParseMode
 from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes
 
 
@@ -3213,7 +3209,7 @@ async def send_movie_page(update_or_query, context, movie, edit=False):
 
     if edit:
         await update_or_query.edit_message_caption(
-            caption=caption, parse_mode=PyroParseMode.HTML
+            caption=caption, parse_mode="HTML"
 , reply_markup=markup
         )
     else:
@@ -3221,13 +3217,13 @@ async def send_movie_page(update_or_query, context, movie, edit=False):
             await update_or_query.message.reply_photo(
                 photo=poster,
                 caption=caption,
-                parse_mode=PyroParseMode.HTML
+                parse_mode="HTML"
 ,
                 reply_markup=markup,
             )
         else:
             await update_or_query.message.reply_text(
-                caption, parse_mode=PyroParseMode.HTML
+                caption, parse_mode="HTML"
 , reply_markup=markup
             )
 
@@ -3252,7 +3248,7 @@ async def movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_caption(
             caption=f"📝 <b>{title}</b>\n\n{plot}",
-            parse_mode=PyroParseMode.HTML
+            parse_mode="HTML"
 ,
             reply_markup=markup,
         )
@@ -3273,7 +3269,7 @@ async def movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not cast:
             await query.edit_message_caption(
                 caption="❌ No cast info available.",
-                parse_mode=PyroParseMode.HTML
+                parse_mode="HTML"
 ,
                 reply_markup=InlineKeyboardMarkup(
                     [[InlineKeyboardButton("⬅️ Back", callback_data=f"movie_back:{imdb_id}")]]
@@ -3293,7 +3289,7 @@ async def movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await query.edit_message_caption(
-            caption=caption, parse_mode=PyroParseMode.HTML
+            caption=caption, parse_mode="HTML"
 , reply_markup=markup
         )
 
@@ -7611,4 +7607,3 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
