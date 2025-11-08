@@ -3020,7 +3020,7 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     chat = update.effective_chat
 
-    # Resolve user to show info for
+    # Resolve user
     if not context.args and not update.message.reply_to_message:
         user = update.effective_user
     else:
@@ -3032,7 +3032,7 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = user.id
 
-    # Get user's presence status in the group
+    # Presence
     presence = "Member"
     if chat.type in ["group", "supergroup"]:
         try:
@@ -3041,12 +3041,10 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 presence = "Owner"
             elif member.status == "administrator":
                 presence = "Admin"
-            else:
-                presence = "Member"
         except Exception:
             presence = "Unknown"
 
-    # Get user bio if any
+    # Bio
     bio = "No bio available."
     try:
         full_user = await bot.get_chat(user_id)
@@ -3055,28 +3053,22 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
-    # Get total profile photos count
-    user = await bot.get_chat(user_id)
-    profile_photos = await bot.get_user_profile_photos(user.id)
-
+    # Profile photos
+    profile_photos = await bot.get_user_profile_photos(user_id)
     total_photos = profile_photos.total_count if profile_photos else 0
 
-    # Approved status
+    # Other flags
     approved = "Yes" if user_id in approved_users else "No"
-
-    # AFK status
     afk_status = "User is currently afk!" if user_id in afk_users else "User is not afk!"
 
-    # Banned status
     banned = "No"
     try:
         member_status = await chat.get_member(user_id)
         if member_status.status == "kicked":
             banned = "Yes"
     except Exception:
-        banned = "Yes"  # Possibly banned or not present
+        banned = "Yes"
 
-    # Muted status
     muted = "No"
     try:
         member_status = await chat.get_member(user_id)
@@ -3085,59 +3077,50 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         muted = "No"
 
-    # Escape all user-generated texts for MarkdownV2
-    first_name_escaped = escape_md(user.first_name or "")
-    last_name_escaped = escape_md(user.last_name or "")
-    username_escaped = escape_md(user.username) if user.username else "N/A"
-    presence_escaped = escape_md(presence)
-    bio_escaped = escape_md(bio)
-    approved_escaped = escape_md(approved)
-    afk_escaped = escape_md(afk_status)
-    banned_escaped = escape_md(banned)
-    muted_escaped = escape_md(muted)
+    # 🧩 Escape user input for HTML
+    name = escape(f"{user.first_name or ''} {user.last_name or ''}".strip())
+    username = f"@{escape(user.username)}" if user.username else "N/A"
+    mention = f"<a href='tg://user?id={user_id}'>{escape(user.first_name or 'User')}</a>"
+    bio = escape(bio)
+    presence = escape(presence)
 
-    # Escape mention name for clickable mention
-    mention = f"[{escape_md(user.first_name or 'User')}](tg://user?id={user_id})"
-
-    # Build message text in requested format
+    # 🧾 Message text
     message_text = (
         "⌬ ᴜsᴇʀ ɪɴғᴏʀᴍᴀᴛɪᴏɴ ⌬\n"
         "•────────[×]────────•\n\n"
         f"✧ ᴜꜱᴇʀɪᴅ : {user_id}\n"
-        f"✧ ɴᴀᴍᴇ : {first_name_escaped} {last_name_escaped}\n"
-        f"✧ ᴜꜱᴇʀɴᴀᴍᴇ : @{username_escaped}\n"
-        f"✧ ᴘʀᴇꜱᴇɴᴄᴇ : {presence_escaped}\n"
+        f"✧ ɴᴀᴍᴇ : {name}\n"
+        f"✧ ᴜꜱᴇʀɴᴀᴍᴇ : {username}\n"
+        f"✧ ᴘʀᴇꜱᴇɴᴄᴇ : {presence}\n"
         f"✧ ᴍᴇɴᴛɪᴏɴ : {mention}\n"
-        f"✧ ʙɪᴏ : {bio_escaped}\n"
+        f"✧ ʙɪᴏ : {bio}\n"
         f"✧ ᴘʀᴏꜰɪʟᴇ ᴘʜᴏᴛᴏꜱ : {total_photos}\n\n"
         "•────────[×]────────•\n\n"
-        f"✧ ᴀᴘᴘʀᴏᴠᴇᴅ : {approved_escaped}\n"
-        f"✧ ᴀꜰᴋ ꜱᴛᴀᴛᴜꜱ : {afk_escaped}\n"
-        f"✧ ʙᴀɴɴᴇᴅ ʜᴇʀᴇ : {banned_escaped}\n"
-        f"✧ ᴍᴜᴛᴇᴅ : {muted_escaped}\n\n"
+        f"✧ ᴀᴘᴘʀᴏᴠᴇᴅ : {approved}\n"
+        f"✧ ᴀꜰᴋ ꜱᴛᴀᴛᴜꜱ : {afk_status}\n"
+        f"✧ ʙᴀɴɴᴇᴅ ʜᴇʀᴇ : {banned}\n"
+        f"✧ ᴍᴜᴛᴇᴅ : {muted}\n\n"
         "•────────[×]────────•"
     )
 
-    # Prepare to send profile photo if available
+    # 🖼 Send with photo if available
     photo_file = None
     if total_photos > 0:
         try:
-            photo = profile_photos.photos[0][-1]  # highest res photo
+            photo = profile_photos.photos[0][-1]
             file = await bot.get_file(photo.file_id)
-            photo_bytearray = await file.download_as_bytearray()
-            photo_file = BytesIO(photo_bytearray)
+            data = await file.download_as_bytearray()
+            photo_file = BytesIO(data)
             photo_file.name = "profile.jpg"
         except Exception:
             photo_file = None
 
-    # Send photo with caption if photo available, else send text message only
     if photo_file:
         await bot.send_photo(
             chat_id=chat.id,
             photo=photo_file,
             caption=message_text,
             parse_mode="HTML",
-
             disable_notification=True,
         )
     else:
