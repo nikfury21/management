@@ -4007,7 +4007,6 @@ async def extract_image_subject(query: str) -> str:
 # --- System Prompt (Custom personality) ---
 SYSTEM_PROMPT = (
     "You are a chatting assistant and reply in a concise, savage or roast tone "
-    "Dont sound like robotic or ai and dont unnecessary explain anything until asked"
     "Dont ever mention that you are giving roast or sarcasm like answer"
     "Don't reply in a formal or textbook way — sound human and natural. "
     "Keep replies structured, and use **bold** headers, bullet points, and spacing for clarity. "
@@ -7598,4 +7597,5 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
