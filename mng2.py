@@ -5354,7 +5354,7 @@ async def tagall(update, context):
 
     ongoing_tagall[chat_id] = True
     message_text = " ".join(context.args) if context.args else ""
-    message_text = escape(message_text)
+    message_text = html.escape(message_text, quote=False)
 
     try:
         participants = await get_all_members(chat_id)
@@ -5363,7 +5363,7 @@ async def tagall(update, context):
         for user in participants:
             if user.bot:
                 continue
-            name = escape(user.first_name or "User")
+            name = html.escape(user.first_name or "User", quote=False)
             user_mentions.append(f"<a href='tg://user?id={user.id}'>{name}</a>")
 
         batch_size = 5
@@ -5373,7 +5373,7 @@ async def tagall(update, context):
                 break
 
             batch_mentions = user_mentions[i: i + batch_size]
-            tag_message = message_text + "<br><br>" + " ".join(batch_mentions)
+            tag_message = message_text + "\n\n" + " ".join(batch_mentions)
 
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -5391,7 +5391,6 @@ async def tagall(update, context):
         await update.message.reply_text(f"Failed to fetch members or send tags: {e}")
 
     ongoing_tagall[chat_id] = False
-
 
 
 async def stop_tagall(update, context):
