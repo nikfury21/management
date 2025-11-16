@@ -112,6 +112,16 @@ from datetime import datetime, timezone
 from html import escape 
 # Ensure Pyrogram's own button classes are used for RPS
 from pyrogram.types import InlineKeyboardMarkup as PyroInlineKeyboardMarkup, InlineKeyboardButton as PyroInlineKeyboardButton
+from merged import (
+    start_cmd,
+    meme_cmd,
+    ttt_cmd,
+    ttt_cancel,
+    ttt_callback,
+    c4_cmd,
+    c4_callback
+)
+
 
 def boldify(text: str) -> str:
     return re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
@@ -4738,7 +4748,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             duration_str = " ".join(duration_parts) or "moments"
             user_chat = await context.bot.get_chat(sender_id)
             display_name = get_full_name(user_chat)
-            text = f"[{display_name}](tg://user?id={sender_id}) Is now back online and they were afk for {duration_str}."
+            text = f"<a href='tg://user?id={sender_id}'>{html.escape(display_name)}</a> is now back online and they were AFK for {duration_str}."
 
             if afk_data.get("reason") and afk_data["reason"] != "None":
                 text += f"\nReason: {afk_data['reason']}"
@@ -4756,13 +4766,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         bio.name = "sticker.png"
                         bg.save(bio, "PNG")
                         bio.seek(0)
-                        await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode="Markdown")
+                        await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode=ParseMode.HTML)
                     else:
-                        await message.reply_text(text, parse_mode="Markdown")
+                        await message.reply_text(text, parse_mode=ParseMode.HTML)
                 else:
-                    await message.reply_text(text, parse_mode="Markdown")
+                    await message.reply_text(text, parse_mode=ParseMode.HTML)
             except Exception:
-                await message.reply_text(text, parse_mode="Markdown")
+                await message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
     # --- Mentions / AFK reply (per-chat) ---
@@ -4872,15 +4882,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     bio.name = "sticker.png"
                     bg.save(bio, "PNG")
                     bio.seek(0)
-                    await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode="Markdown")
+                    await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode=ParseMode.HTML)
                 else:
-                    await message.reply_text(text, parse_mode="Markdown")
+                    await message.reply_text(text, parse_mode=ParseMode.HTML)
             else:
-                await message.reply_text(text, parse_mode="Markdown")
+                await message.reply_text(text, parse_mode=ParseMode.HTML)
         except Exception:
             # best-effort fallback
             try:
-                await message.reply_text(text, parse_mode="Markdown")
+                await message.reply_text(text, parse_mode=ParseMode.HTML)
             except Exception:
                 pass
 
@@ -5338,6 +5348,8 @@ async def safe_sleep(seconds, chat_id):
 
 
 
+from html import escape
+
 async def tagall(update, context):
     if not await is_admin(update, update.message.from_user.id):
         await update.message.reply_text("Only admins can use /tagall.")
@@ -5352,7 +5364,7 @@ async def tagall(update, context):
 
     ongoing_tagall[chat_id] = True
     message_text = " ".join(context.args) if context.args else ""
-    message_text = escape_markdown(message_text)
+    message_text = escape(message_text)
 
     try:
         participants = await get_all_members(chat_id)
@@ -5361,26 +5373,25 @@ async def tagall(update, context):
         for user in participants:
             if user.bot:
                 continue
-            name = escape_markdown(user.first_name or "User")
-            user_mentions.append(f"[{name}](tg://user?id={user.id})")
+            name = escape(user.first_name or "User")
+            user_mentions.append(f"<a href='tg://user?id={user.id}'>{name}</a>")
 
         batch_size = 5
         for i in range(0, len(user_mentions), batch_size):
-            # Check here if /stop was called, break if so
+
             if not ongoing_tagall.get(chat_id, False):
                 break
 
-            batch_mentions = user_mentions[i : i + batch_size]
-            tag_message = message_text + "\n\n" + " ".join(batch_mentions)
+            batch_mentions = user_mentions[i: i + batch_size]
+            tag_message = message_text + "<br><br>" + " ".join(batch_mentions)
 
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=tag_message,
-                parse_mode=ParseMode.MARKDOWN_V2,
+                parse_mode="HTML",
                 disable_web_page_preview=True,
             )
 
-            # Check again before sleeping, to exit early if stopped
             if not ongoing_tagall.get(chat_id, False):
                 break
 
@@ -5390,8 +5401,6 @@ async def tagall(update, context):
         await update.message.reply_text(f"Failed to fetch members or send tags: {e}")
 
     ongoing_tagall[chat_id] = False
-
-
 
 
 
@@ -5763,7 +5772,7 @@ async def afk_command(update, context):
     if reason and reason != "None":
         text += f"\nReason: {reason}"
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 
@@ -5835,7 +5844,7 @@ async def translate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             f"**Translated ({target_lang}):**\n{translated}",
-            parse_mode="Markdown"
+            parse_mode=ParseMode.HTML
         )
     except Exception as e:
         await update.message.reply_text(f"Error translating: {e}")
@@ -5950,7 +5959,7 @@ async def calc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not expression:
         await message.reply_text(
             "⚠️ Usage: `/calc 5+2` or `/calc √9` or `/calc 2^3`",
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.HTML
         )
         return
 
@@ -6003,7 +6012,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Send message with invisible mentions
         await message.reply_text(
             f"🚨 Reported to admins{invisible_mentions}",
-            parse_mode="Markdown"
+            parse_mode=ParseMode.HTML
         )
 
     except Exception as e:
@@ -7581,6 +7590,16 @@ async def start_bots():
         application.add_handler(CallbackQueryHandler(font_callback, pattern=r"^(F|P|C)\|"))
         application.add_handler(CommandHandler("generate", generate))
         application.add_handler(CommandHandler("spam", spam_handler))
+        application.add_handler(CommandHandler("startgames", start_cmd))
+        application.add_handler(CommandHandler("meme", meme_cmd))
+        application.add_handler(CommandHandler("ttt", ttt_cmd))
+        application.add_handler(CommandHandler("ttt_cancel", ttt_cancel))
+        application.add_handler(CommandHandler("c4", c4_cmd))
+
+# Callbacks
+        application.add_handler(CallbackQueryHandler(ttt_callback, pattern="^ttt"))
+        application.add_handler(CallbackQueryHandler(c4_callback, pattern="^c4"))
+
 
 
 
@@ -7632,7 +7651,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
