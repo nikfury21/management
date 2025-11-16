@@ -4733,7 +4733,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             afk_data = None
 
-
         if afk_data:
             duration = datetime.utcnow() - afk_data["time"]
             hours, remainder = divmod(int(duration.total_seconds()), 3600)
@@ -4746,12 +4745,14 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if seconds:
                 duration_parts.append(f"{seconds}s")
             duration_str = " ".join(duration_parts) or "moments"
+
             user_chat = await context.bot.get_chat(sender_id)
             display_name = get_full_name(user_chat)
-            text = f"<a href='tg://user?id={sender_id}'>{html.escape(display_name)}</a> is now back online and they were AFK for {duration_str}."
 
+            text = f"<a href='tg://user?id={sender_id}'>{html.escape(display_name)}</a> is now back online and they were AFK for {duration_str}."
             if afk_data.get("reason") and afk_data["reason"] != "None":
                 text += f"\nReason: {afk_data['reason']}"
+
             try:
                 if afk_data.get("media"):
                     if afk_data.get("media_type") == "photo":
@@ -4766,14 +4767,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         bio.name = "sticker.png"
                         bg.save(bio, "PNG")
                         bio.seek(0)
-                        await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode=ParseMode.HTML)
+                        await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode="HTML")
                     else:
-                        await message.reply_text(text, parse_mode=ParseMode.HTML)
+                        await message.reply_text(text, parse_mode="HTML")
                 else:
-                    await message.reply_text(text, parse_mode=ParseMode.HTML)
+                    await message.reply_text(text, parse_mode="HTML")
             except Exception:
-                await message.reply_text(text, parse_mode=ParseMode.HTML)
-
+                await message.reply_text(text, parse_mode="HTML")
 
     # --- Mentions / AFK reply (per-chat) ---
     mentioned_ids = set()
@@ -4782,20 +4782,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Collect mentions but only where the AFK was set (if per-chat)
     if message.entities:
         for ent in message.entities:
-            # direct text-mention (user object)
             if ent.type == "text_mention" and ent.user:
                 uid = ent.user.id
                 afk_entry = afk_users.get(uid)
                 if uid in afk_users:
-                    # if entry is dict with per-chat list, check membership
                     if isinstance(afk_entry, dict) and afk_entry.get("chats"):
                         if current_chat in afk_entry.get("chats", []):
                             mentioned_ids.add(uid)
                     else:
-                        # backward-compat: no 'chats' -> treat as global AFK
                         mentioned_ids.add(uid)
 
-            # @username mention — map username -> afk user and apply same chat check
             elif ent.type == "mention":
                 username = message.text[ent.offset: ent.offset + ent.length]
                 for afk_id in list(afk_users.keys()):
@@ -4811,7 +4807,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         else:
                             mentioned_ids.add(afk_id)
 
-    # If replying to an AFK user's message, only count it if AFK applies in this chat
+    # If replying to an AFK user's message
     if message.reply_to_message:
         replied_user = message.reply_to_message.from_user
         if replied_user and replied_user.id in afk_users:
@@ -4822,13 +4818,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 mentioned_ids.add(replied_user.id)
 
-    # Now respond for each mentioned AFK user (only those allowed above)
+    # Respond for each AFK user mentioned
     for uid in mentioned_ids:
         afk_data = afk_users.get(uid)
         if not afk_data:
             continue
 
-        # determine start time robustly (datetime or numeric timestamp)
         start_time = None
         if isinstance(afk_data, dict) and "time" in afk_data:
             start_time = afk_data["time"]
@@ -4843,18 +4838,14 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if isinstance(start_time, (int, float)):
             duration = datetime.utcnow() - datetime.utcfromtimestamp(int(start_time))
         else:
-            # assume datetime
             duration = datetime.utcnow() - start_time
 
         hours, remainder = divmod(int(duration.total_seconds()), 3600)
         minutes, seconds = divmod(remainder, 60)
         duration_parts = []
-        if hours:
-            duration_parts.append(f"{hours}h")
-        if minutes:
-            duration_parts.append(f"{minutes}m")
-        if seconds:
-            duration_parts.append(f"{seconds}s")
+        if hours: duration_parts.append(f"{hours}h")
+        if minutes: duration_parts.append(f"{minutes}m")
+        if seconds: duration_parts.append(f"{seconds}s")
         duration_str = " ".join(duration_parts) or "moments"
 
         try:
@@ -4864,7 +4855,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             display_name = "User"
 
         text = f"[{display_name}](tg://user?id={uid}) is AFK since {duration_str}."
-
         if isinstance(afk_data, dict) and afk_data.get("reason") and afk_data["reason"] != "None":
             text += f"\nReason: {afk_data['reason']}"
 
@@ -4882,17 +4872,17 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     bio.name = "sticker.png"
                     bg.save(bio, "PNG")
                     bio.seek(0)
-                    await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode=ParseMode.HTML)
+                    await message.reply_photo(photo=InputFile(bio), caption=text, parse_mode="HTML")
                 else:
-                    await message.reply_text(text, parse_mode=ParseMode.HTML)
+                    await message.reply_text(text, parse_mode="HTML")
             else:
-                await message.reply_text(text, parse_mode=ParseMode.HTML)
+                await message.reply_text(text, parse_mode="HTML")
         except Exception:
-            # best-effort fallback
             try:
-                await message.reply_text(text, parse_mode=ParseMode.HTML)
+                await message.reply_text(text, parse_mode="HTML")
             except Exception:
                 pass
+
 
 
     # ---- NIGHTMODE ENFORCEMENT ----
@@ -5719,7 +5709,6 @@ async def resolve_username_to_user(username: str, context):
         return None
     
 
-
 async def afk_command(update, context):
     """
     Sets user as AFK.
@@ -5747,11 +5736,9 @@ async def afk_command(update, context):
             afk_media = reply.sticker.file_id
             afk_media_type = "sticker"
 
-    # store AFK with per-chat info so AFK only ends when user returns in that same chat
     chat_id = update.effective_chat.id if update.effective_chat else None
     existing = afk_users.get(user.id)
 
-    # Merge if AFK already active elsewhere
     if existing:
         chats = existing.get("chats", set())
         chats.add(chat_id)
@@ -5766,14 +5753,11 @@ async def afk_command(update, context):
         "chats": chats,
     }
 
-
-
     text = f"[{user.first_name}](tg://user?id={user.id}) Is now away from keyboard! Sayonara!"
     if reason and reason != "None":
         text += f"\nReason: {reason}"
 
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-
+    await update.message.reply_text(text, parse_mode="HTML")
 
 
 
@@ -5959,31 +5943,24 @@ async def calc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not expression:
         await message.reply_text(
             "⚠️ Usage: `/calc 5+2` or `/calc √9` or `/calc 2^3`",
-            parse_mode=ParseMode.HTML
+            parse_mode="HTML"
         )
         return
 
     try:
-        # Allow ^ as exponent
         expression = expression.replace("^", "**")
-
-        # Replace √9 → math.sqrt(9)
         expression = re.sub(r'√\s*([0-9\.]+)', r'sqrt(\1)', expression)
 
-
-        # Define safe math environment
         allowed_names = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
         allowed_names.update({"abs": abs, "round": round})
 
-        # Validate input
         if not re.match(r'^[0-9+\-*/().,^√% eE a-zA-Z\s]+$', expression):
             await message.reply_text("❌ Invalid characters detected!")
             return
 
-        # Evaluate safely
         result = eval(expression, {"__builtins__": None}, allowed_names)
 
-        await message.reply_text(f"🧮 *Result:* `{result}`", parse_mode=ParseMode.MARKDOWN)
+        await message.reply_text(f"🧮 *Result:* `{result}`", parse_mode="MARKDOWN")
 
     except Exception as e:
         await message.reply_text(f"❌ Error: {e}")
