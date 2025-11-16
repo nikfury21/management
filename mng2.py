@@ -4705,7 +4705,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
     # === AFK Logic ===
-    # === AFK Logic ===
     if sender_id in afk_users:
         afk_data = afk_users[sender_id]
         current_chat = message.chat.id
@@ -4854,7 +4853,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             display_name = "User"
 
-        text = f"[{display_name}](tg://user?id={uid}) is AFK since {duration_str}."
+        text = f"<a href='tg://user?id={uid}'>{html.escape(display_name)}</a> is AFK since {duration_str}."
         if isinstance(afk_data, dict) and afk_data.get("reason") and afk_data["reason"] != "None":
             text += f"\nReason: {afk_data['reason']}"
 
@@ -7632,7 +7631,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
