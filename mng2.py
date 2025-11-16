@@ -5753,11 +5753,16 @@ async def afk_command(update, context):
         "chats": chats,
     }
 
-    text = f"[{user.first_name}](tg://user?id={user.id}) Is now away from keyboard! Sayonara!"
+    text = (
+        f"<a href='tg://user?id={user.id}'>"
+        f"{html.escape(user.first_name)}</a> is now away from keyboard! Sayonara!"
+    )
+
     if reason and reason != "None":
-        text += f"\nReason: {reason}"
+        text += f"\nReason: {html.escape(reason)}"
 
     await update.message.reply_text(text, parse_mode="HTML")
+
 
 
 
