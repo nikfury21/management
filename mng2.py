@@ -2814,7 +2814,7 @@ from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 # List of all command names in the order we want to display them
 COMMAND_LIST = [
-    "start","song","play","help","info","warn","warns","del","ban","unban","admins","promote",
+    "start","help","info","warn","warns","del","ban","unban","admins","promote",
     "demote","addblacklist","unblacklist","blacklist","unblacklistall","approve",
     "unapprove","approved","unapproveall","purge","filter","filters","unfilter",
     "afk","mute","unmute","id","kick","tmute","kickme","waifu","tagall","stop",
@@ -2823,18 +2823,12 @@ COMMAND_LIST = [
     "calc","report","nightmode","ud","rmwarn","resetwarns","welcome","setwelcome",
     "goodbye","setgoodbye","when","captcha","pic","free","unfree","freelist",
     "character","unfilterall","editdelete","freesystem","mmf","mms","ping",
-    "movie","ask","font","symbol","generate","spam","meme","ttt",
-    "c4"
+    "movie","ask","font","symbol","generate","spam","startgames","meme","ttt",
+    "ttt_cancel","c4"
 ]
 
 # Detailed help text for each command (HTML formatted)
 COMMAND_HELP = {
-    "song": "<b>/song</b> - <i>Search any song and gives direct mp3 file.</i>\n"
-            "<u>Usage</u>: <b>/song 'song name' by 'artist'</b>\n"
-            "<u>Example</u>: <b>/song story of my live by one direction</b>",
-    "play": "<b>/play</b> - <i>Play any song in voice that.</i>\n"
-             "<u>Usage</u>: <b>Start a voice chat and do /play 'song name' by 'artist' </b>\n"
-             "<u>Example</u>: <b>/play skyfall</b>",
     "start": "<b>/start</b> - <i>Start the bot and see the welcome message.</i>\n"
              "<u>Usage</u>: <b>/start</b>\n"
              "<u>Example</u>: <b>/start</b>",
@@ -3089,17 +3083,9 @@ ITEMS_PER_PAGE = 10
 PAGES = (TOTAL_COMMANDS + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE  # total pages
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # If in a group, prompt to start in private
-    if update.effective_chat.type in ["group", "supergroup"]:
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("Start me in PM!", 
-                                 url=f"https://t.me/{context.bot.username}")
-        ]])
-        await update.message.reply_text(
-            "Start me in private chat to see available commands.",
-            reply_markup=keyboard
-        )
-        return
+
+    # ❌ REMOVED “Start me in PM” BLOCK
+    # Now /help works in groups also
 
     # Build page 1 of commands
     page = 1
@@ -3108,8 +3094,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     page_cmds = COMMAND_LIST[start_idx:end_idx]
 
     # Header text with total count
-    help_text = f"<b>Available commands ({TOTAL_COMMANDS}):</b>\n" \
-                "<i>Select a command to see usage and an example.</i>"
+    help_text = (
+        f"<b>Available commands ({TOTAL_COMMANDS}):</b>\n"
+        "<i>Select a command to see usage and an example.</i>"
+    )
 
     # Inline keyboard of command buttons (2 columns)
     keyboard = []
@@ -3117,18 +3105,26 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         row = []
         cmd_name = page_cmds[i]
         row.append(InlineKeyboardButton(f"/{cmd_name}", callback_data=f"help_cmd_{cmd_name}"))
-        if i+1 < len(page_cmds):
-            cmd_name2 = page_cmds[i+1]
+        if i + 1 < len(page_cmds):
+            cmd_name2 = page_cmds[i + 1]
             row.append(InlineKeyboardButton(f"/{cmd_name2}", callback_data=f"help_cmd_{cmd_name2}"))
         keyboard.append(row)
 
     # Navigation buttons (Back/Forward/Page Indicator)
     nav_row = []
-    # No Back on first page
-    nav_row.append(InlineKeyboardButton(f"Page {page} of {PAGES}", 
-                                       callback_data=f"help_page_{page}"))
+    nav_row.append(
+        InlineKeyboardButton(
+            f"Page {page} of {PAGES}",
+            callback_data=f"help_page_{page}"
+        )
+    )
     if page < PAGES:
-        nav_row.append(InlineKeyboardButton("Forward", callback_data=f"help_page_{page+1}"))
+        nav_row.append(
+            InlineKeyboardButton(
+                "Forward",
+                callback_data=f"help_page_{page+1}"
+            )
+        )
     keyboard.append(nav_row)
 
     reply_markup = InlineKeyboardMarkup(keyboard)
