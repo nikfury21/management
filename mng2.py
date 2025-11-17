@@ -1810,20 +1810,33 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     end = datetime.now()
 
     latency = (end - start).total_seconds()
-
     uptime = datetime.now() - datetime.fromtimestamp(BOT_START_TIME)
+
     days = uptime.days
     hours, remainder = divmod(uptime.seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
 
+    # --- identical uptime format as Pyrogram version ---
+    parts = []
+    if days:
+        parts.append(f"{days} day{'s' if days > 1 else ''}")
+    if hours:
+        parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+    if minutes:
+        parts.append(f"{minutes} minute{'s' if minutes > 1 else ''}")
+    if seconds:
+        parts.append(f"{seconds} second{'s' if seconds > 1 else ''}")
+
+    uptime_str = " ".join(parts) if parts else "a moment"
+    # ---------------------------------------------------
+
     await msg.edit_text(
         f"<b>Pong!</b> <code>{latency:.2f}s</code>\n"
-        f"<b>Uptime</b> - <code>{days}d {hours}h {minutes}m {seconds}s</code>\n"
+        f"<b>Uptime</b> - <code>{uptime_str}</code>\n"
         f"<b>Bot of</b> <a href='https://t.me/PraiseTheFraud'>F U R Y</a>",
         parse_mode="HTML",
         disable_web_page_preview=True
     )
-
 
 
 
@@ -7935,7 +7948,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
