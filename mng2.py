@@ -2824,7 +2824,7 @@ COMMAND_LIST = [
     "goodbye","setgoodbye","when","captcha","pic","free","unfree","freelist",
     "character","unfilterall","editdelete","freesystem","mmf","mms","ping",
     "movie","ask","font","symbol","generate","spam","startgames","meme","ttt",
-    "ttt_cancel","c4"
+    "c4"
 ]
 
 # Detailed help text for each command (HTML formatted)
@@ -7935,6 +7935,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
