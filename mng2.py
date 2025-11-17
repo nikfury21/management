@@ -2809,88 +2809,402 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
+
+# List of all command names in the order we want to display them
+COMMAND_LIST = [
+    "start","song","play","help","info","warn","warns","del","ban","unban","admins","promote",
+    "demote","addblacklist","unblacklist","blacklist","unblacklistall","approve",
+    "unapprove","approved","unapproveall","purge","filter","filters","unfilter",
+    "afk","mute","unmute","id","kick","tmute","kickme","waifu","tagall","stop",
+    "pin","unpin","setflood","setfloodmode","q","qr","blacklistmode","lock",
+    "unlock","locks","kang","anime","zombies","rzombies","tr","getsticker","pp",
+    "calc","report","nightmode","ud","rmwarn","resetwarns","welcome","setwelcome",
+    "goodbye","setgoodbye","when","captcha","pic","free","unfree","freelist",
+    "character","unfilterall","editdelete","freesystem","mmf","mms","ping",
+    "movie","ask","font","symbol","generate","spam","meme","ttt",
+    "c4"
+]
+
+# Detailed help text for each command (HTML formatted)
+COMMAND_HELP = {
+    "song": "<b>/song</b> - <i>Search any song and gives direct mp3 file.</i>\n"
+            "<u>Usage</u>: <b>/song 'song name' by 'artist'</b>\n"
+            "<u>Example</u>: <b>/song story of my live by one direction</b>",
+    "play": "<b>/play</b> - <i>Play any song in voice that.</i>\n"
+             "<u>Usage</u>: <b>Start a voice chat and do /play 'song name' by 'artist' </b>\n"
+             "<u>Example</u>: <b>/play skyfall</b>",
+    "start": "<b>/start</b> - <i>Start the bot and see the welcome message.</i>\n"
+             "<u>Usage</u>: <b>/start</b>\n"
+             "<u>Example</u>: <b>/start</b>",
+    "help": "<b>/help</b> - <i>Show this help message.</i>\n"
+            "<u>Usage</u>: <b>/help</b>\n"
+            "<u>Example</u>: <b>/help</b>",
+    "info": "<b>/info</b> - <i>Show information about a user or chat.</i>\n"
+            "<u>Usage</u>: <b>/info</b> (reply to a user or provide @username)\n"
+            "<u>Example</u>: <b>/info</b> @username",
+    "warn": "<b>/warn</b> - <i>Warn a user (automatically bans after 3 warnings).</i>\n"
+            "<u>Usage</u>: <b>/warn</b> <i>@username</i>\n"
+            "<u>Example</u>: <b>/warn</b> @user1",
+    "warns": "<b>/warns</b> - <i>Show total number of warnings a user has.</i>\n"
+             "<u>Usage</u>: <b>/warns</b> (reply to a user or provide @username)\n"
+             "<u>Example</u>: <b>/warns</b> @username",
+    "del": "<b>/del</b> - <i>Delete a message (must reply to the message you want to delete).</i>\n"
+           "<u>Usage</u>: <b>/del</b>\n"
+           "<u>Example</u>: (reply to any message) <b>/del</b>",
+    "ban": "<b>/ban</b> - <i>Ban a user from the chat.</i>\n"
+           "<u>Usage</u>: <b>/ban</b> <i>@username</i>\n"
+           "<u>Example</u>: <b>/ban</b> @troublesome_user",
+    "unban": "<b>/unban</b> - <i>Unban a user by their user ID.</i>\n"
+             "<u>Usage</u>: <b>/unban</b> <i>user_id</i>\n"
+             "<u>Example</u>: <b>/unban</b> 123456789",
+    "admins": "<b>/admins</b> - <i>Show a list of all administrators in the chat.</i>\n"
+              "<u>Usage</u>: <b>/admins</b>\n"
+              "<u>Example</u>: <b>/admins</b>",
+    "promote": "<b>/promote</b> - <i>Promote a user to admin (reply or mention).</i>\n"
+               "<u>Usage</u>: <b>/promote</b> <i>@username</i>\n"
+               "<u>Example</u>: <b>/promote</b> @helpful_user",
+    "demote": "<b>/demote</b> - <i>Demote an admin to a normal user (reply or mention).</i>\n"
+              "<u>Usage</u>: <b>/demote</b> <i>@username</i>\n"
+              "<u>Example</u>: <b>/demote</b> @admin_user",
+    "addblacklist": "<b>/addblacklist</b> - <i>Add a word or phrase to the blacklist.</i>\n"
+                    "<u>Usage</u>: <b>/addblacklist</b> <i>word_or_phrase</i>\n"
+                    "<u>Example</u>: <b>/addblacklist</b> spam",
+    "unblacklist": "<b>/unblacklist</b> - <i>Remove a word or phrase from the blacklist.</i>\n"
+                   "<u>Usage</u>: <b>/unblacklist</b> <i>word_or_phrase</i>\n"
+                   "<u>Example</u>: <b>/unblacklist</b> spam",
+    "blacklist": "<b>/blacklist</b> - <i>Show all blacklisted words or phrases.</i>\n"
+                 "<u>Usage</u>: <b>/blacklist</b>\n"
+                 "<u>Example</u>: <b>/blacklist</b>",
+    "unblacklistall": "<b>/unblacklistall</b> - <i>Remove all words from the blacklist.</i>\n"
+                      "<u>Usage</u>: <b>/unblacklistall</b>\n"
+                      "<u>Example</u>: <b>/unblacklistall</b>",
+    "approve": "<b>/approve</b> - <i>Approve a user (allow them to send messages in restricted mode).</i>\n"
+               "<u>Usage</u>: <b>/approve</b> <i>@username</i>\n"
+               "<u>Example</u>: <b>/approve</b> @new_user",
+    "unapprove": "<b>/unapprove</b> - <i>Revoke approval from a user.</i>\n"
+                 "<u>Usage</u>: <b>/unapprove</b> <i>@username</i>\n"
+                 "<u>Example</u>: <b>/unapprove</b> @user123",
+    "approved": "<b>/approved</b> - <i>Show a list of all approved users.</i>\n"
+                "<u>Usage</u>: <b>/approved</b>\n"
+                "<u>Example</u>: <b>/approved</b>",
+    "unapproveall": "<b>/unapproveall</b> - <i>Unapprove all users at once.</i>\n"
+                    "<u>Usage</u>: <b>/unapproveall</b>\n"
+                    "<u>Example</u>: <b>/unapproveall</b>",
+    "purge": "<b>/purge</b> - <i>Delete the last N messages.</i>\n"
+             "<u>Usage</u>: <b>/purge</b> <i>N</i>\n"
+             "<u>Example</u>: <b>/purge</b> 10",
+    "filter": "<b>/filter</b> - <i>Add a custom filter (delete messages containing a keyword).</i>\n"
+              "<u>Usage</u>: <b>/filter</b> <i>keyword</i>\n"
+              "<u>Example</u>: <b>/filter</b> spoiler",
+    "filters": "<b>/filters</b> - <i>List all custom filters.</i>\n"
+               "<u>Usage</u>: <b>/filters</b>\n"
+               "<u>Example</u>: <b>/filters</b>",
+    "unfilter": "<b>/unfilter</b> - <i>Remove a custom filter.</i>\n"
+                "<u>Usage</u>: <b>/unfilter</b> <i>keyword</i>\n"
+                "<u>Example</u>: <b>/unfilter</b> spoiler",
+    "unfilterall": "<b>/unfilterall</b> - <i>Remove all custom filters.</i>\n"
+                   "<u>Usage</u>: <b>/unfilterall</b>\n"
+                   "<u>Example</u>: <b>/unfilterall</b>",
+    "afk": "<b>/afk</b> - <i>Set your status as AFK.</i>\n"
+           "<u>Usage</u>: <b>/afk</b> [status]\n"
+           "<u>Example</u>: <b>/afk</b> Away for lunch",
+    "mute": "<b>/mute</b> - <i>Mute a user (no messages allowed).</i>\n"
+            "<u>Usage</u>: <b>/mute</b> <i>@username</i>\n"
+            "<u>Example</u>: <b>/mute</b> @noisy_user",
+    "unmute": "<b>/unmute</b> - <i>Unmute a user.</i>\n"
+              "<u>Usage</u>: <b>/unmute</b> <i>@username</i>\n"
+              "<u>Example</u>: <b>/unmute</b> @noisy_user",
+    "id": "<b>/id</b> - <i>Show your user ID (or another user's ID if replied/mentioned).</i>\n"
+          "<u>Usage</u>: <b>/id</b>\n"
+          "<u>Example</u>: (reply to a user) <b>/id</b>",
+    "kick": "<b>/kick</b> - <i>Kick a user from the chat.</i>\n"
+            "<u>Usage</u>: <b>/kick</b> <i>@username</i>\n"
+            "<u>Example</u>: <b>/kick</b> @troublemaker",
+    "tmute": "<b>/tmute</b> - <i>Temporarily mute a user.</i>\n"
+             "<u>Usage</u>: <b>/tmute</b> <i>@username</i> <i>duration</i>\n"
+             "<u>Example</u>: <b>/tmute</b> @user 10m",
+    "kickme": "<b>/kickme</b> - <i>Make the bot kick you from the chat.</i>\n"
+              "<u>Usage</u>: <b>/kickme</b>\n"
+              "<u>Example</u>: <b>/kickme</b>",
+    "waifu": "<b>/waifu</b> - <i>Get a partner (fun command).</i>\n"
+             "<u>Usage</u>: <b>/waifu</b>\n"
+             "<u>Example</u>: <b>/waifu</b>",
+    "tagall": "<b>/tagall</b> - <i>Tag all members in the chat.</i>\n"
+              "<u>Usage</u>: <b>/tagall</b>\n"
+              "<u>Example</u>: <b>/tagall</b>",
+    "stop": "<b>/stop</b> - <i>Stop a running tagall command.</i>\n"
+            "<u>Usage</u>: <b>/stop</b>\n"
+            "<u>Example</u>: <b>/stop</b>",
+    "pin": "<b>/pin</b> - <i>Pin a message (reply to a message).</i>\n"
+           "<u>Usage</u>: <b>/pin</b>\n"
+           "<u>Example</u>: (reply to message) <b>/pin</b>",
+    "unpin": "<b>/unpin</b> - <i>Unpin all messages.</i>\n"
+             "<u>Usage</u>: <b>/unpin</b>\n"
+             "<u>Example</u>: <b>/unpin</b>",
+    "setflood": "<b>/setflood</b> - <i>Restrict users from spamming (set limit).</i>\n"
+                "<u>Usage</u>: <b>/setflood</b> <i>count</i>\n"
+                "<u>Example</u>: <b>/setflood</b> 5",
+    "setfloodmode": "<b>/setfloodmode</b> - <i>Set action on flood (ban/mute/warn/kick/delete).</i>\n"
+                    "<u>Usage</u>: <b>/setfloodmode</b> <i>mode</i>\n"
+                    "<u>Example</u>: <b>/setfloodmode</b> ban",
+    "q": "<b>/q</b> - <i>Quote a text message.</i>\n"
+         "<u>Usage</u>: <b>/q</b> <i>text</i>\n"
+         "<u>Example</u>: <b>/q</b> This is a quote",
+    "qr": "<b>/qr</b> - <i>Quote by replying to a message.</i>\n"
+          "<u>Usage</u>: <b>/qr</b>\n"
+          "<u>Example</u>: (reply to message) <b>/qr</b>",
+    "blacklistmode": "<b>/blacklistmode</b> - <i>Action to take on blacklisted word (tmute/mute/ban/warn/kick/delete).</i>\n"
+                     "<u>Usage</u>: <b>/blacklistmode</b> <i>mode</i>\n"
+                     "<u>Example</u>: <b>/blacklistmode</b> ban",
+    "lock": "<b>/lock</b> - <i>Lock a certain type in the chat (e.g. text, media).</i>\n"
+            "<u>Usage</u>: <b>/lock</b> <i>type</i>\n"
+            "<u>Example</u>: <b>/lock</b> text",
+    "unlock": "<b>/unlock</b> - <i>Unlock a certain type in the chat.</i>\n"
+              "<u>Usage</u>: <b>/unlock</b> <i>type</i>\n"
+              "<u>Example</u>: <b>/unlock</b> text",
+    "locks": "<b>/locks</b> - <i>List all current locks in the chat.</i>\n"
+             "<u>Usage</u>: <b>/locks</b>\n"
+             "<u>Example</u>: <b>/locks</b>",
+    "kang": "<b>/kang</b> - <i>Save a sticker/GIF to your sticker pack (reply to it).</i>\n"
+            "<u>Usage</u>: <b>/kang</b>\n"
+            "<u>Example</u>: (reply to sticker) <b>/kang</b>",
+    "anime": "<b>/anime</b> - <i>Search for anime details by name.</i>\n"
+             "<u>Usage</u>: <b>/anime</b> <i>name</i>\n"
+             "<u>Example</u>: <b>/anime</b> Naruto",
+    "zombies": "<b>/zombies</b> - <i>Show number of deleted (zombie) accounts in the chat.</i>\n"
+               "<u>Usage</u>: <b>/zombies</b>\n"
+               "<u>Example</u>: <b>/zombies</b>",
+    "rzombies": "<b>/rzombies</b> - <i>Remove all deleted (zombie) accounts from the chat.</i>\n"
+                "<u>Usage</u>: <b>/rzombies</b>\n"
+                "<u>Example</u>: <b>/rzombies</b>",
+    "tr": "<b>/tr</b> - <i>Translate text to a desired language.</i>\n"
+          "<u>Usage</u>: <b>/tr</b> <i>language_text</i>\n"
+          "<u>Example</u>: <b>/tr</b> ru Hello",
+    "getsticker": "<b>/getsticker</b> - <i>Get the sticker’s PNG image with its ID.</i>\n"
+                  "<u>Usage</u>: <b>/getsticker</b> <i>(reply to sticker)</i>\n"
+                  "<u>Example</u>: (reply to sticker) <b>/getsticker</b>",
+    "pp": "<b>/pp</b> - <i>Search for a photo with a given phrase and get description.</i>\n"
+          "<u>Usage</u>: <b>/pp</b> <i>query</i>\n"
+          "<u>Example</u>: <b>/pp</b> sunrise",
+    "calc": "<b>/calc</b> - <i>Calculate a math expression.</i>\n"
+            "<u>Usage</u>: <b>/calc</b> <i>expression</i>\n"
+            "<u>Example</u>: <b>/calc</b> 2+2*3",
+    "report": "<b>/report</b> - <i>Report an issue to the admins.</i>\n"
+              "<u>Usage</u>: <b>/report</b> <i>text</i>\n"
+              "<u>Example</u>: <b>/report</b> spam in chat",
+    "nightmode": "<b>/nightmode</b> - <i>Toggle deletion of non-text media for unapproved users.</i>\n"
+                 "<u>Usage</u>: <b>/nightmode</b> <i>on/off</i>\n"
+                 "<u>Example</u>: <b>/nightmode</b> on",
+    "ud": "<b>/ud</b> - <i>Define a word using Urban Dictionary.</i>\n"
+          "<u>Usage</u>: <b>/ud</b> <i>word</i>\n"
+          "<u>Example</u>: <b>/ud</b> hello",
+    "rmwarn": "<b>/rmwarn</b> - <i>Remove one warning from a user.</i>\n"
+              "<u>Usage</u>: <b>/rmwarn</b> <i>@username</i>\n"
+              "<u>Example</u>: <b>/rmwarn</b> @user",
+    "resetwarns": "<b>/resetwarns</b> - <i>Remove all warnings from a user.</i>\n"
+                  "<u>Usage</u>: <b>/resetwarns</b> <i>@username</i>\n"
+                  "<u>Example</u>: <b>/resetwarns</b> @user",
+    "welcome": "<b>/welcome</b> - <i>Enable or disable welcome messages.</i>\n"
+               "<u>Usage</u>: <b>/welcome</b> <i>on/off</i>\n"
+               "<u>Example</u>: <b>/welcome</b> on",
+    "setwelcome": "<b>/setwelcome</b> - <i>Set a custom welcome message.</i>\n"
+                  "<u>Usage</u>: <b>/setwelcome</b> <i>message text</i>\n"
+                  "<u>Example</u>: <b>/setwelcome</b> Welcome to the group!",
+    "goodbye": "<b>/goodbye</b> - <i>Enable or disable goodbye messages.</i>\n"
+               "<u>Usage</u>: <b>/goodbye</b> <i>on/off</i>\n"
+               "<u>Example</u>: <b>/goodbye</b> off",
+    "setgoodbye": "<b>/setgoodbye</b> - <i>Set a custom goodbye message.</i>\n"
+                  "<u>Usage</u>: <b>/setgoodbye</b> <i>message text</i>\n"
+                  "<u>Example</u>: <b>/setgoodbye</b> Goodbye everyone!",
+    "when": "<b>/when</b> - <i>Show when a message was sent.</i>\n"
+            "<u>Usage</u>: <b>/when</b> (reply to a message)\n"
+            "<u>Example</u>: (reply) <b>/when</b>",
+    "captcha": "<b>/captcha</b> - <i>Enable or disable captcha for new users.</i>\n"
+               "<u>Usage</u>: <b>/captcha</b> <i>on/off</i>\n"
+               "<u>Example</u>: <b>/captcha</b> on",
+    "pic": "<b>/pic</b> - <i>Show all profile photos of a user.</i>\n"
+           "<u>Usage</u>: <b>/pic</b> <i>@username</i>\n"
+           "<u>Example</u>: <b>/pic</b> @john",
+    "free": "<b>/free</b> - <i>Allow a user to send stickers (remove restriction).</i>\n"
+            "<u>Usage</u>: <b>/free</b> <i>@username</i>\n"
+            "<u>Example</u>: <b>/free</b> @user",
+    "unfree": "<b>/unfree</b> - <i>Restrict a user from sending stickers.</i>\n"
+              "<u>Usage</u>: <b>/unfree</b> <i>@username</i>\n"
+              "<u>Example</u>: <b>/unfree</b> @user",
+    "freelist": "<b>/freelist</b> - <i>Show all users allowed to send stickers.</i>\n"
+                "<u>Usage</u>: <b>/freelist</b>\n"
+                "<u>Example</u>: <b>/freelist</b>",
+    "character": "<b>/character</b> - <i>Get information about an anime character.</i>\n"
+                 "<u>Usage</u>: <b>/character</b> <i>character name</i>\n"
+                 "<u>Example</u>: <b>/character</b> Naruto",
+    "editdelete": "<b>/editdelete</b> - <i>Automatically delete edited messages after 30s.</i>\n"
+                  "<u>Usage</u>: <b>/editdelete</b> <i>on/off</i>\n"
+                  "<u>Example</u>: <b>/editdelete</b> on",
+    "freesystem": "<b>/freesystem</b> - <i>Turn the free sticker system on or off.</i>\n"
+                  "<u>Usage</u>: <b>/freesystem</b> <i>on/off</i>\n"
+                  "<u>Example</u>: <b>/freesystem</b> off",
+    "mmf": "<b>/mmf</b> - <i>Apply a meme font style to text (alias /mms).</i>\n"
+           "<u>Usage</u>: <b>/mmf</b> <i>text</i>\n"
+           "<u>Example</u>: <b>/mmf</b> hello world",
+    "mms": "<b>/mms</b> - <i>Apply a meme font style to text (alias /mmf).</i>\n"
+           "<u>Usage</u>: <b>/mms</b> <i>text</i>\n"
+           "<u>Example</u>: <b>/mms</b> example",
+    "ping": "<b>/ping</b> - <i>Check bot responsiveness (replies with “pong”).</i>\n"
+            "<u>Usage</u>: <b>/ping</b>\n"
+            "<u>Example</u>: <b>/ping</b>",
+    "movie": "<b>/movie</b> - <i>Search for a movie by name.</i>\n"
+             "<u>Usage</u>: <b>/movie</b> <i>movie name</i>\n"
+             "<u>Example</u>: <b>/movie</b> Inception",
+    "ask": "<b>/ask</b> - <i>Ask the bot a question (AI-powered answer).</i>\n"
+           "<u>Usage</u>: <b>/ask</b> <i>question</i>\n"
+           "<u>Example</u>: <b>/ask</b> What is the weather today?",
+    "font": "<b>/font</b> - <i>Transform text into different font styles.</i>\n"
+            "<u>Usage</u>: <b>/font</b> <i>text</i>\n"
+            "<u>Example</u>: <b>/font</b> fancy text",
+    "symbol": "<b>/symbol</b> - <i>Convert text into symbolic characters.</i>\n"
+              "<u>Usage</u>: <b>/symbol</b> <i>text</i>\n"
+              "<u>Example</u>: <b>/symbol</b> hello",
+    "generate": "<b>/generate</b> - <i>Generate an image from text (AI).</i>\n"
+                "<u>Usage</u>: <b>/generate</b> <i>prompt</i>\n"
+                "<u>Example</u>: <b>/generate</b> a sunrise over a mountain",
+    "spam": "<b>/spam</b> - <i>Spam a text a number of times.</i>\n"
+            "<u>Usage</u>: <b>/spam</b> <i>text</i> <i>count</i>\n"
+            "<u>Example</u>: <b>/spam</b> hello 5",
+    "meme": "<b>/meme</b> - <i>Send a random meme.</i>\n"
+            "<u>Usage</u>: <b>/meme</b>\n"
+            "<u>Example</u>: <b>/meme</b>",
+    "ttt": "<b>/ttt</b> - <i>Start a Tic-Tac-Toe game.</i>\n"
+           "<u>Usage</u>: <b>/ttt</b> (follow bot prompts)\n"
+           "<u>Example</u>: <b>/ttt</b>",
+    "c4": "<b>/c4</b> - <i>Start a Connect-4 game.</i>\n"
+          "<u>Usage</u>: <b>/c4</b> (follow bot prompts)\n"
+          "<u>Example</u>: <b>/c4</b>"
+}
+
+# Number of commands
+TOTAL_COMMANDS = len(COMMAND_LIST)
+ITEMS_PER_PAGE = 10
+PAGES = (TOTAL_COMMANDS + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE  # total pages
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # If in a group, prompt to start in private
     if update.effective_chat.type in ["group", "supergroup"]:
-        # Group → Show message with inline button linking to PM
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💐 Start me in PM!", url=f"https://t.me/{BOT_USERNAME}")]
-        ])
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("Start me in PM!", 
+                                 url=f"https://t.me/{context.bot.username}")
+        ]])
         await update.message.reply_text(
-            "Start me in pm to know my abilities and commands!",
+            "Start me in private chat to see available commands.",
             reply_markup=keyboard
         )
-    else:
-        # Private chat → Show full commands list
-        commands = [
-            "/info - Show user info",
-            "/warn - Warn user, ban after 3 warns",
-            "/warns - Show total number of warns a user has",
-            "/del - Delete message (reply)",
-            "/ban - Ban user",
-            "/unban - Unban user by ID",
-            "/admins - List admins",
-            "/promote - Promote user to admin",
-            "/demote - Demote admin",
-            "/addblacklist - Add blacklist word",
-            "/unblacklist - Remove blacklist word",
-            "/blacklist - Show blacklist",
-            "/unblacklistall - Deletes all blacklist words",
-            "/approve - Approve user",
-            "/unapprove - Unapprove user",
-            "/approved - Show list of all approved users",
-            "/unapproveall - Unapproves all approved users",
-            "/purge - Delete last N messages",
-            "/filter - Add filter",
-            "/filters - List filters",
-            "/unfilter - Remove filter",
-            "/afk - Set AFK status",
-            "/mute - Mute user",
-            "/unmute - Unmute user",
-            "/id - Show user or chat ID",
-            "/kick - Kick user",
-            "/tmute - Temporarily mute user",
-            "/kickme - Kick yourself",
-            "/waifu - Get your partner, approved by astro",
-            "/tagall - Tag all members",
-            "/pin - Pin message (reply)",
-            "/unpin - Unpin all messages",
-            "/setflood - Restrict user from spamming",
-            "/setfloodmode - Action taken if user floods the chat",
-            "/q - Quote texts",
-            "/blacklistmode - tmute/mute/ban/warn/kick/delete",
-            "/lock - Lock any type",
-            "/unlock - Unlock any type",
-            "/locks - List all locks present",
-            "/kang - Save any sticker/gif in your pack",
-            "/zombies - Show number of deleted accounts",
-            "/rzombies - Remove all deleted accounts",
-            "/tr - Translate text to your desired language",
-            "/getsticker - Gives sticker in png form with sticker ID",
-            "/pp - Search for photo and gives description",
-            "/calc - Calculates anything",
-            "/report - Report to admins",
-            "/nightmode - Delete non-text of unapproved/non-admin users",
-            "/ud - Tell meaning of word",
-            "/rmwarn - Remove one warning of user",
-            "/resetwarns - Removes all warnings of user",
-            "/welcome on/off - Enable or disable welcome messages",
-            "/setwelcome - Set custom welcome message",
-            "/goodbye - Enable or disable goodbye messages",
-            "/setgoodbye - Set goodbye message",
-            "/when - Show when a message was sent",
-            "/captcha - Force captcha before user interacts in group",
-            "/pic - Show all profile photos of a user",
-            "/free - Free user, allow sending stickers",
-            "/unfree - Restrict user from sending stickers",
-            "/freelist - Show all freed users",
-            "/character - Overview of anime character",
-            "/unfilterall - Removes all filters",
-            "/editdelete - Deletes all edited messages after 30s",
-            "/freesystem- turn on/off the free system"
-        ]
+        return
 
-        help_text = "Available commands:\n" + "\n".join(commands)
-        await update.message.reply_text(help_text, parse_mode="HTML")
+    # Build page 1 of commands
+    page = 1
+    start_idx = (page - 1) * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    page_cmds = COMMAND_LIST[start_idx:end_idx]
+
+    # Header text with total count
+    help_text = f"<b>Available commands ({TOTAL_COMMANDS}):</b>\n" \
+                "<i>Select a command to see usage and an example.</i>"
+
+    # Inline keyboard of command buttons (2 columns)
+    keyboard = []
+    for i in range(0, len(page_cmds), 2):
+        row = []
+        cmd_name = page_cmds[i]
+        row.append(InlineKeyboardButton(f"/{cmd_name}", callback_data=f"help_cmd_{cmd_name}"))
+        if i+1 < len(page_cmds):
+            cmd_name2 = page_cmds[i+1]
+            row.append(InlineKeyboardButton(f"/{cmd_name2}", callback_data=f"help_cmd_{cmd_name2}"))
+        keyboard.append(row)
+
+    # Navigation buttons (Back/Forward/Page Indicator)
+    nav_row = []
+    # No Back on first page
+    nav_row.append(InlineKeyboardButton(f"Page {page} of {PAGES}", 
+                                       callback_data=f"help_page_{page}"))
+    if page < PAGES:
+        nav_row.append(InlineKeyboardButton("Forward", callback_data=f"help_page_{page+1}"))
+    keyboard.append(nav_row)
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(help_text, parse_mode="HTML", reply_markup=reply_markup)
+
+async def help_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()  # acknowledge callback
+
+    # Extract requested page number from callback data
+    data = query.data  # e.g. "help_page_3"
+    try:
+        page = int(data.split("_")[-1])
+    except:
+        return
+
+    # Bound page number
+    if page < 1: page = 1
+    if page > PAGES: page = PAGES
+
+    # Build commands list for that page
+    start_idx = (page - 1) * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    page_cmds = COMMAND_LIST[start_idx:end_idx]
+
+    help_text = f"<b>Available commands ({TOTAL_COMMANDS}):</b>\n" \
+                "<i>Select a command to see usage and an example.</i>"
+
+    keyboard = []
+    for i in range(0, len(page_cmds), 2):
+        row = []
+        cmd_name = page_cmds[i]
+        row.append(InlineKeyboardButton(f"/{cmd_name}", callback_data=f"help_cmd_{cmd_name}"))
+        if i+1 < len(page_cmds):
+            cmd_name2 = page_cmds[i+1]
+            row.append(InlineKeyboardButton(f"/{cmd_name2}", callback_data=f"help_cmd_{cmd_name2}"))
+        keyboard.append(row)
+
+    # Navigation row
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton("Back", callback_data=f"help_page_{page-1}"))
+    nav_row.append(InlineKeyboardButton(f"Page {page} of {PAGES}", 
+                                       callback_data=f"help_page_{page}"))
+    if page < PAGES:
+        nav_row.append(InlineKeyboardButton("Forward", callback_data=f"help_page_{page+1}"))
+    keyboard.append(nav_row)
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # Edit the existing help message (text and keyboard)
+    await query.edit_message_text(help_text, parse_mode="HTML", reply_markup=reply_markup)
+
+async def help_cmd_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    # Extract the command name
+    data = query.data  # e.g. "help_cmd_ban"
+    cmd = data.split("help_cmd_")[-1]
+    if cmd not in COMMAND_HELP:
+        await query.answer(text="Unknown command.", show_alert=True)
+        return
+
+    help_text = COMMAND_HELP[cmd]
+
+    # Provide a Back button to return to the command list (page 1)
+    keyboard = [
+        [InlineKeyboardButton("Back", callback_data="help_page_1")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Edit message with command usage text
+    await query.edit_message_text(help_text, parse_mode="HTML", reply_markup=reply_markup)
+
+
+
 
 # ==== Image search helpers & /find command ====
 import logging, requests
@@ -7575,17 +7889,11 @@ async def start_bots():
         application.add_handler(CommandHandler("ttt", ttt_cmd))
         application.add_handler(CommandHandler("ttt_cancel", ttt_cancel))
         application.add_handler(CommandHandler("c4", c4_cmd))
-
-# Callbacks
         application.add_handler(CallbackQueryHandler(ttt_callback, pattern="^ttt"))
         application.add_handler(CallbackQueryHandler(c4_callback, pattern="^c4"))
-
-
-
-
-
-
-
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CallbackQueryHandler(help_page_callback, pattern=r"^help_page_"))
+        application.add_handler(CallbackQueryHandler(help_cmd_callback, pattern=r"^help_cmd_"))
         application.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE, edited_message_handler, block=False), group=2)
 
 
@@ -7631,6 +7939,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
