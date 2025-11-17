@@ -564,7 +564,7 @@ def save_registered_users():
 load_registered_users()
 
 # --- Moderators ---
-MODS = {8353079084}  # 🔹 Replace with your actual Telegram user IDs
+MODS = {8353079084, 8355303766}  # 🔹 Replace with your actual Telegram user IDs
 MOD_IDS = MODS  # alias so both names work
 
 
@@ -7948,6 +7948,7 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
 
 
 
