@@ -2016,7 +2016,6 @@ async def get_latest_pic(client, message):
     if sending_pics:
         await message.reply_text("♦️ I'm already processing another request. Try again.")
         return
-
     sending_pics = True
 
     try:
@@ -2036,9 +2035,10 @@ async def get_latest_pic(client, message):
             sending_pics = False
             return
 
-        # Fetch latest photo using get_chat_photos (always exists)
+        # ---------- FETCH ALL ACCESSIBLE PFPs ----------
         photos = []
-        async for p in pyro_client.get_chat_photos(target, limit=1):
+        async for p in pyro_client.get_chat_photos(target):
+            # p has .date and .file_id
             photos.append(p)
 
         if not photos:
@@ -2046,25 +2046,28 @@ async def get_latest_pic(client, message):
             sending_pics = False
             return
 
-        await message.reply_photo(
-            photo=photos[0].file_id,
-            caption="📸 Latest accessible profile photo."
-        )
+        # ---------- SORT BY DATE DESC (newest first) ----------
+        photos.sort(key=lambda x: x.date, reverse=True)
+
+        # Latest accessible PFP
+        latest = photos[0].file_id
+
+        await message.reply_photo(photo=latest)
 
     except Exception as e:
         await message.reply_text(f"⚠️ Error: {e}")
     finally:
         sending_pics = False
 
+
 @pyro_client.on_message(pyro_filters.command("picall"))
 async def get_all_pics(client, message):
     global sending_pics
-    if not pic_enabled.get(message.chat.id, True):
+    if not picall_enabled.get(message.chat.id, True):
         return
     if sending_pics:
         await message.reply_text("♦️ I'm already sending profile pictures of another user!")
         return
-
     sending_pics = True
 
     try:
@@ -2084,21 +2087,26 @@ async def get_all_pics(client, message):
             sending_pics = False
             return
 
-        # Collect all photos using get_chat_photos
+        # ---------- FETCH ALL ACCESSIBLE PFPs ----------
         photos = []
         async for p in pyro_client.get_chat_photos(target):
-            photos.append(p.file_id)
+            photos.append(p)
 
         if not photos:
             await message.reply_text("🚫 No accessible profile photos found.")
             sending_pics = False
             return
 
-        # Send in batches of 10
-        for i in range(0, len(photos), 10):
-            batch = photos[i:i+10]
+        # ---------- SORT BY DATE (oldest → newest or newest → oldest) ----------
+        photos.sort(key=lambda x: x.date)
+
+        # Convert to media group
+        file_ids = [p.file_id for p in photos]
+
+        for i in range(0, len(file_ids), 10):
+            batch = file_ids[i:i+10]
             media_group = [PyroInputMediaPhoto(x) for x in batch]
-            await pyro_client.send_media_group(chat_id=message.chat.id, media=media_group)
+            await pyro_client.send_media_group(message.chat.id, media_group)
 
     except Exception as e:
         await message.reply_text(f"⚠️ Error: {e}")
@@ -7981,7 +7989,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
