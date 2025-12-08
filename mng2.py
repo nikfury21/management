@@ -2008,66 +2008,109 @@ from telegram import InputMediaPhoto as PTBInputMediaPhoto
 
 
 @pyro_client.on_message(pyro_filters.command("pic"))
-async def get_profile_pics(client, message):
+async def get_latest_pic(client, message):
     global sending_pics
     if not pic_enabled.get(message.chat.id, True):
         return
     if sending_pics:
-        await message.reply_text("♦️ You can't use this command now cause I am already sending profile pictures of a user!")
+        await message.reply_text("♦️ I'm already processing another request. Try again.")
         return
+
     sending_pics = True
+
     try:
-        # --- Resolve target user ---
-        target = None
+        # --- Resolve user ---
         if message.reply_to_message:
             target = message.reply_to_message.from_user.id
-        elif len(message.command) > 1:  # /pic @username or user_id
+        elif len(message.command) > 1: 
             arg = message.command[1]
             try:
-                if arg.isdigit():
-                    target = int(arg)
-                else:
-                    user = await client.get_users(arg)
-                    target = user.id
+                target = int(arg) if arg.isdigit() else (await client.get_users(arg)).id
             except Exception:
                 await message.reply_text("🚫 Invalid username or user ID.")
                 sending_pics = False
                 return
         else:
-            await message.reply_text("⚠️ Reply to a user or provide @username/user_id.")
+            await message.reply_text("⚠️ Reply to a user or give @username/user_id.")
             sending_pics = False
             return
 
-        # --- Collect photos ---
-        photos = []
-        async for photo in client.get_chat_photos(target):
-            photos.append(photo.file_id)
+        # --- Fetch only latest accessible photo ---
+        photos = await client.get_profile_photos(target, limit=1)
+
         if not photos:
-            await message.reply_text("🚫 No profile photos found for this user.")
+            await message.reply_text("🚫 No accessible profile picture found.")
             sending_pics = False
             return
 
-        # --- Decide where to send ---
-        send_chat_id = message.chat.id
-        dm_mode = False
-        if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-            send_chat_id = message.from_user.id
-            dm_mode = True
-            await message.reply_text("📩 Profile pictures will be sent to your DM.")
+        # Send latest
+        await message.reply_photo(
+            photo=photos[0].file_id,
+            caption="📸 Latest accessible profile photo."
+        )
+
+    except Exception as e:
+        await message.reply_text(f"⚠️ Error: {e}")
+
+    finally:
+        sending_pics = False
+
+
+
+@pyro_client.on_message(pyro_filters.command("picall"))
+async def get_all_pics(client, message):
+    global sending_pics
+    if not pic_enabled.get(message.chat.id, True):
+        return
+    if sending_pics:
+        await message.reply_text("♦️ I'm already sending profile pictures of another user!")
+        return
+
+    sending_pics = True
+
+    try:
+        # --- Resolve user ---
+        if message.reply_to_message:
+            target = message.reply_to_message.from_user.id
+        elif len(message.command) > 1:
+            arg = message.command[1]
+            try:
+                target = int(arg) if arg.isdigit() else (await client.get_users(arg)).id
+            except Exception:
+                await message.reply_text("🚫 Invalid username or user ID.")
+                sending_pics = False
+                return
+        else:
+            await message.reply_text("⚠️ Reply to a user or give @username/user_id.")
+            sending_pics = False
+            return
+
+        # --- Collect ALL accessible photos ---
+        photos = []
+        try:
+            phs = await client.get_profile_photos(target)
+            for p in phs:
+                photos.append(p.file_id)
+        except:
+            pass
+
+        if not photos:
+            await message.reply_text("🚫 No accessible profile photos found.")
+            sending_pics = False
+            return
 
         # --- Send in batches of 10 ---
         for i in range(0, len(photos), 10):
-            media_group = [PyroInputMediaPhoto(file_id) for file_id in photos[i:i+10]]
-
-            try:
-                await client.send_media_group(chat_id=send_chat_id, media=media_group)
-            except Exception:
-                if dm_mode:
-                    await message.reply_text("⚠️ I can’t send you DMs. Please start me in private first!")
-                break
+            batch = photos[i:i+10]
+            media_group = [PyroInputMediaPhoto(x) for x in batch]
+            await client.send_media_group(
+                chat_id=message.chat.id,
+                media=media_group
+            )
 
     except Exception as e:
-        await message.reply_text(f"⚠️ Error: {str(e)}")
+        await message.reply_text(f"⚠️ Error: {e}")
+
     finally:
         sending_pics = False
 
@@ -7948,7 +7991,6 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
 
