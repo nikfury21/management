@@ -1,3 +1,4 @@
+
 import sys, asyncio
 
 if sys.platform.startswith("win"):
@@ -2025,7 +2026,7 @@ async def get_latest_pic(client, message):
         elif len(message.command) > 1:
             arg = message.command[1]
             try:
-                target = int(arg) if arg.isdigit() else (await client.get_users(arg)).id
+                target = int(arg) if arg.isdigit() else (await pyro_client.get_users(arg)).id
             except:
                 await message.reply_text("🚫 Invalid username or user ID.")
                 sending_pics = False
@@ -2035,16 +2036,18 @@ async def get_latest_pic(client, message):
             sending_pics = False
             return
 
-        # Fetch latest profile photo (limit=1)
-        photos = await client.get_user_profile_photos(target, limit=1)
+        # Fetch latest photo using get_chat_photos (always exists)
+        photos = []
+        async for p in pyro_client.get_chat_photos(target, limit=1):
+            photos.append(p)
 
-        if not photos.total_count:
+        if not photos:
             await message.reply_text("🚫 No accessible profile picture found.")
             sending_pics = False
             return
 
         await message.reply_photo(
-            photo=photos.photos[0][0].file_id,
+            photo=photos[0].file_id,
             caption="📸 Latest accessible profile photo."
         )
 
@@ -2052,7 +2055,6 @@ async def get_latest_pic(client, message):
         await message.reply_text(f"⚠️ Error: {e}")
     finally:
         sending_pics = False
-
 
 @pyro_client.on_message(pyro_filters.command("picall"))
 async def get_all_pics(client, message):
@@ -2072,7 +2074,7 @@ async def get_all_pics(client, message):
         elif len(message.command) > 1:
             arg = message.command[1]
             try:
-                target = int(arg) if arg.isdigit() else (await client.get_users(arg)).id
+                target = int(arg) if arg.isdigit() else (await pyro_client.get_users(arg)).id
             except:
                 await message.reply_text("🚫 Invalid username or user ID.")
                 sending_pics = False
@@ -2082,23 +2084,21 @@ async def get_all_pics(client, message):
             sending_pics = False
             return
 
-        # Fetch all photos
-        photos = await client.get_user_profile_photos(target)
+        # Collect all photos using get_chat_photos
+        photos = []
+        async for p in pyro_client.get_chat_photos(target):
+            photos.append(p.file_id)
 
-        if not photos.total_count:
+        if not photos:
             await message.reply_text("🚫 No accessible profile photos found.")
             sending_pics = False
             return
 
-        file_ids = []
-        for photo in photos.photos:
-            file_ids.append(photo[0].file_id)
-
-        # Batch sending
-        for i in range(0, len(file_ids), 10):
-            batch = file_ids[i:i+10]
+        # Send in batches of 10
+        for i in range(0, len(photos), 10):
+            batch = photos[i:i+10]
             media_group = [PyroInputMediaPhoto(x) for x in batch]
-            await client.send_media_group(chat_id=message.chat.id, media=media_group)
+            await pyro_client.send_media_group(chat_id=message.chat.id, media=media_group)
 
     except Exception as e:
         await message.reply_text(f"⚠️ Error: {e}")
