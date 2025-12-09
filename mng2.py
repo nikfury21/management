@@ -6838,7 +6838,7 @@ async def when(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     replied_msg = update.message.reply_to_message
-    msg_time_utc = replied_msg.date  # datetime object in UTC
+    msg_time_utc = replied_msg.date  # datetime in UTC
 
     # Convert UTC → IST
     ist = pytz.timezone("Asia/Kolkata")
@@ -6847,21 +6847,31 @@ async def when(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Format IST time
     formatted_time = msg_time_ist.strftime("%A, %B %d, %Y at %I:%M:%S %p (IST)")
 
-    # Calculate how long ago
+    # Calculate full time difference
     now = datetime.now(timezone.utc)
     diff = now - msg_time_utc
 
-    days, seconds = diff.days, diff.seconds
+    days = diff.days
+    seconds = diff.seconds
+
+    hours = seconds // 3600
+    seconds %= 3600
+
+    minutes = seconds // 60
+    seconds %= 60
+
+    # Build a readable string like “1 day 2 hours 5 minutes 9 seconds ago”
+    parts = []
     if days > 0:
-        ago = f"{days} day{'s' if days > 1 else ''} ago"
-    elif seconds >= 3600:
-        hrs = seconds // 3600
-        ago = f"{hrs} hour{'s' if hrs > 1 else ''} ago"
-    elif seconds >= 60:
-        mins = seconds // 60
-        ago = f"{mins} minute{'s' if mins > 1 else ''} ago"
-    else:
-        ago = f"{seconds} second{'s' if seconds != 1 else ''} ago"
+        parts.append(f"{days} day{'s' if days != 1 else ''}")
+    if hours > 0:
+        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if minutes > 0:
+        parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+    if seconds > 0:
+        parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+
+    ago = " ".join(parts) + " ago"
 
     text = (
         f"📅 Originally posted on {formatted_time}\n\n"
@@ -7989,6 +7999,5 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
 
