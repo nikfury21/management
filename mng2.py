@@ -7803,9 +7803,10 @@ _fonts_temp.append(("small_alt", "SmallAlt", build_font_from_samples(
 
 # 21 Fancy Latin alternates (mix of tildes/diacritics)
 _fonts_temp.append(("fancy", "Fancy", build_font_from_samples(
-    "𝔣𝔞𝔫𝔠𝔶𝔩𝔞𝔱𝔦𝔫𝔞𝓵𝓽𝓮𝓻𝓷𝓪𝓽𝓲𝓸𝓷𝓼𝓮𝓽",
-    "𝔉𝔄𝔑𝔆𝔜𝔏𝔄𝔗𝔦𝔑𝔄𝓛𝓣𝓔𝓡𝓝𝓐𝓣𝓘𝓞𝓝𝓢𝓔𝓣"  # (approx - mostly decorative)
+    "𝔞𝔟𝔠𝔡𝔢𝔣𝔤𝔥𝔦𝔧𝔨𝔩𝔪𝔫𝔬𝔭𝔮𝔯𝔰𝔱𝔲𝔳𝔴𝔵𝔶𝔷",
+    "𝔄𝔅ℭ𝔇𝔈𝔉𝔊ℌℑ𝔎𝔏𝔐𝔑𝔒𝔓𝔔ℜ𝔖𝔗𝔘𝔙𝔚𝔛𝔜ℨ"
 )))
+
 
 # 22 Mathematical bold (alternative)
 _fonts_temp.append(("mathbold", "MathBold", build_font_from_samples(
@@ -8279,5 +8280,4 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
 
