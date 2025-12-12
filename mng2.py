@@ -2503,40 +2503,36 @@ def compose_font(seed):
     return font_fn
 
 # --- Build fonts ---
-# --- Build fonts ---
 TEXT_FONTS=[]
 
-# --- Custom fixed fonts (user text will appear dynamically) ---
+# --- Custom fixed fonts (converted to {text}) ---
 STATIC_FONTS = [
-    "𝐟𝐮𝐫𝐲","𝗳𝘂𝗿𝘺","𝒇𝒖𝒓𝒚","𝙛𝙪𝙧𝙮","𝖋𝖚𝖗𝖞","𝕗𝕦𝕣𝕪","🅵🆄🆁🆈","↓ᵐᵒʳᵉ ᵗᵉˣᵗ ᶠᵒⁿᵗˢ↓",
-    "🇫🇺🇷🇾","千ㄩ尺ㄚ","ｷひ尺ﾘ","乍凵尺と","ｆｕｒｙ　仮ゴヴ","ｆｕｒｙ　（仮ゴヴ）","【﻿ｆｕｒｙ】",
-    "𝔣𝔲𝔯𝔶","𝖋𝖚𝖗𝖞","♚♟  ℱ𝕦яЎ  👍☯","𝓯𝓾𝓻𝔂","𝒻𝓊𝓇𝓎","𝕗𝕦𝕣𝕪","ｆｕｒｙ","🍪  🎀  𝒻𝓊𝓇𝓎  🎀  🍪",
-    "ꜰᴜʀʏ","ʎɹnɟ","f⃣   u⃣   r⃣   y⃣","f⃞    u⃞    r⃞    y⃞","🄵🅄🅁🅈","ʏɿuᎸ",
-    "f̸͙̆̒͝͝ŭ̶͓̗̪̟̠͕̃́͑̐̍̾̂͠r̸̞͎̗̥͇͍̬͈͉̖̈̄̃̎̂̈͋̇ỳ̷̱",
-    "fᵤᵣy","ᶠᵘʳʸ","ⓕⓤⓡⓨ","Ŧยгץ","ϝυɾყ","ʄʊʀʏ","ᎦᏬᏒᎩ","ʄųཞყ","fนrฯ",
-    "𝐟𝐮𝐫𝐲","𝘧𝘶𝘳𝘺","𝙛𝙪𝙮","𝚏𝚞𝚛𝚢","FЦЯY","ƒυяу","£µr¥","₣ɄⱤɎ","【f】【u】【r】【y】","『f』『u』『r』『y』",
-    "≋f≋u≋r≋y≋","░f░u░r░y░","(っ◔◡◔)っ ♥ fury ♥","˜”*°•.˜”*°• fury •°*”˜.•°*”˜","[̲̅f][̲̅u][̲̅r][̲̅y]",
-    "f҉u҉r҉y҉","ƒմɾվ","ᖴᑌᖇY","ᖴᑘᖇᖻ","f̶u̶r̶y̶","f̴u̴r̴y̴","f̷u̷r̷y̷","f̲u̲r̲y̲","f̳u̳r̳y̳",
-    "f̾u̾r̾y̾","f♥u♥r♥y","f͎u͎r͎y͎","f͓̽u͓̽r͓̽y͓̽","♐︎◆︎❒︎⍓︎","✷★  🎀  𝒻𝓊𝓇𝓎  🎀  ★✷",
-    "🐎  🎀  𝒻𝓊𝓇𝓎  🎀  🐎","🍦  🎀  𝒻𝓊𝓇𝓎  🎀  🍦","✧🌠  🎀  𝒻𝓊𝓇𝓎  🎀  🌠✧",
-    "🍡 ⋆ 🍎  🎀  𝒻𝓊𝓇𝓎  🎀  🍎 ⋆ 🍡","➶➶➶➶➶ 𝒇ＵŘ𝐲 ➷➷➷➷➷",
-    "🐼🍮  ℱＵŘ¥  🐙💋","【｡_｡】 ƑùＲү 【｡_｡】","💝☯  ⓕ𝐮ᖇ𝔶  🎄🍧","🎅💔  𝕗ᵘя𝐲  💛🎁",
-    "💋♪  千ย𝕣¥  🍩😎","🐺☆  Ⓕᑌ𝔯у  🐻👹","😂👤  𝕗𝓊𝓇ㄚ  ♘☺","💲👮  ғⓊＲ𝕐  🐲✋",
-    "🐸♟  ғᵘ𝓻Ｙ  ♞👌","😝🍓  Ⓕ𝓾𝓡Ｙ  ♝🐲","🐻☝  ƒ𝓊ʳ𝔂  ✋🐨","🐻👑  𝐟𝔲尺Ⓨ  ✋👺",
-    "🎃♞  𝐅𝓾𝕣Ƴ  👣ඏ","ඏ👮  Ƒ𝐔𝐑𝐲  ✋♤","ඏඏ  ƒᑌŕƳ  ✌💔","💥♘  𝓕ｕяү  🐲🐠",
-    "👑💔  ƑⓊⓇЎ  ♗☹","☹♧  𝔽ＵŘ𝓎  🐒🐒","·.¸¸.·♩♪♫ ⓕᑌⓇЎ ♫♪♩·.¸¸.·",
-    "✌👣  ⓕᑌŘ𝕪  ♥👤","🕊 ⋆ 🐾  🎀  𝒻𝓊𝓇𝓎  🎀  🐾 ⋆ 🕊","❈  🎀  𝒻𝓊𝓇𝓎  🎀  ❈","✧  🎀  𝒻𝓊𝓇𝓎  🎀  ✧"
+    "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "↓ᵐᵒʳᵉ ᵗᵉˣᵗ ᶠᵒⁿᵗˢ↓",
+    "{text}", "{text}", "{text}", "{text}", "{text}　仮ゴヴ", "{text}　（仮ゴヴ）", f"【﻿{text}】",
+    "{text}", "{text}", "♚♟  {text}  👍☯", "{text}", "{text}", "{text}", "{text}", "🍪  🎀  {text}  🎀  🍪",
+    "{text}", "{text}", "f⃣   u⃣   r⃣   y⃣".replace("fury", "{text}"), "f⃞    u⃞    r⃞    y⃞".replace("fury", "{text}"),
+    "{text}", "{text}",
+    "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}",
+    "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}",
+    "{text}", "{text}", "{text}", "{text}", "{text}", "✷★  🎀  {text}  🎀  ★✷",
+    "🐎  🎀  {text}  🎀  🐎","🍦  🎀  {text}  🎀  🍦","✧🌠  🎀  {text}  🎀  🌠✧",
+    "🍡 ⋆ 🍎  🎀  {text}  🎀  🍎 ⋆ 🍡","➶➶➶➶➶ {text} ➷➷➷➷➷",
+    "{text}","【｡_｡】 {text} 【｡_｡】","💝☯  {text}  🎄🍧","🎅💔  {text}  💛🎁",
+    "{text}","🐺☆  {text}  🐻👹","😂👤  {text}  ♘☺","💲👮  {text}  🐲✋",
+    "🐸♟  {text}  ♞👌","😝🍓  {text}  ♝🐲","🐻☝  {text}  ✋🐨","🐻👑  {text}  ✋👺",
+    "🎃♞  {text}  👣ඏ","ඏ👮  {text}  ✋♤","ඏඏ  {text}  ✌💔","💥♘  {text}  🐲🐠",
+    "👑💔  {text}  ♗☹","☹♧  {text}  🐒🐒","·.¸¸.·♩♪♫ {text} ♫♪♩·.¸¸.·",
+    "✌👣  {text}  ♥👤","🕊 ⋆ 🐾  🎀  {text}  🎀  🐾 ⋆ 🕊","❈  🎀  {text}  🎀  ❈","✧  🎀  {text}  🎀  ✧"
 ]
 
-# Add them first (dynamic replacement)
+# Apply dynamic replacement
 for i, sample in enumerate(STATIC_FONTS, start=1):
-    TEXT_FONTS.append((f"s{i}", f"Static{i}", lambda t, s=sample: s.replace('fury', t)))
+    TEXT_FONTS.append((f"s{i}", f"Static{i}", lambda t, s=sample: s.replace("{text}", t)))
 
-# --- keep all existing generated fonts intact ---
+# --- generated fonts ---
 for i in range(TARGET_FONTS):
     f = compose_font(i)
     TEXT_FONTS.append((str(i), f"Font{i}", f))
-
 
 # --- Symbol list ---
 SYMBOLS = ["•","‣","◦","○","●","◉","◎","◇","◆","✦","✧","✵","✶","✷","✸",
