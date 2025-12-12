@@ -2413,7 +2413,8 @@ import logging, random, unicodedata, math, itertools
 from uuid import uuid4
 
 PAGE_SIZE = 10
-TARGET_FONTS = 420
+# keep generated fonts high so total pool is large
+TARGET_FONTS = 500
 MAX_ATTEMPTS = 10000
 logger = logging.getLogger(__name__)
 
@@ -2421,7 +2422,7 @@ ALPHABET_LO = "abcdefghijklmnopqrstuvwxyz"
 ALPHABET_UP = ALPHABET_LO.upper()
 DIGITS = "0123456789"
 
-# --- Pools for aesthetic variants ---
+# --- Pools for aesthetic variants (used by compose_font) ---
 char_pools = {
     'a': ['a','ɑ','α','ᴀ','ą','à','á','â','ä'],
     'b': ['b','Ь','в','Ƅ','ɓ','ᵇ'],
@@ -2505,36 +2506,124 @@ def compose_font(seed):
 # --- Build fonts ---
 TEXT_FONTS=[]
 
-# --- Custom fixed fonts (converted to {text}) ---
+# --- Static font templates (unique, no surrounding emojis / ornaments) ---
+# Each template contains the {text} placeholder which will be replaced at runtime.
+# This pack focuses on script, decorative, double-struck, serif, sans, monospace, fraktur, bubble/circled variants.
 STATIC_FONTS = [
-    "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "↓ᵐᵒʳᵉ ᵗᵉˣᵗ ᶠᵒⁿᵗˢ↓",
-    "{text}", "{text}", "{text}", "{text}", "{text}　仮ゴヴ", "{text}　（仮ゴヴ）", f"【﻿{text}】",
-    "{text}", "{text}", "♚♟  {text}  👍☯", "{text}", "{text}", "{text}", "{text}", "🍪  🎀  {text}  🎀  🍪",
-    "{text}", "{text}", "f⃣   u⃣   r⃣   y⃣".replace("fury", "{text}"), "f⃞    u⃞    r⃞    y⃞".replace("fury", "{text}"),
-    "{text}", "{text}",
-    "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}",
-    "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}", "{text}",
-    "{text}", "{text}", "{text}", "{text}", "{text}", "✷★  🎀  {text}  🎀  ★✷",
-    "🐎  🎀  {text}  🎀  🐎","🍦  🎀  {text}  🎀  🍦","✧🌠  🎀  {text}  🎀  🌠✧",
-    "🍡 ⋆ 🍎  🎀  {text}  🎀  🍎 ⋆ 🍡","➶➶➶➶➶ {text} ➷➷➷➷➷",
-    "{text}","【｡_｡】 {text} 【｡_｡】","💝☯  {text}  🎄🍧","🎅💔  {text}  💛🎁",
-    "{text}","🐺☆  {text}  🐻👹","😂👤  {text}  ♘☺","💲👮  {text}  🐲✋",
-    "🐸♟  {text}  ♞👌","😝🍓  {text}  ♝🐲","🐻☝  {text}  ✋🐨","🐻👑  {text}  ✋👺",
-    "🎃♞  {text}  👣ඏ","ඏ👮  {text}  ✋♤","ඏඏ  {text}  ✌💔","💥♘  {text}  🐲🐠",
-    "👑💔  {text}  ♗☹","☹♧  {text}  🐒🐒","·.¸¸.·♩♪♫ {text} ♫♪♩·.¸¸.·",
-    "✌👣  {text}  ♥👤","🕊 ⋆ 🐾  🎀  {text}  🎀  🐾 ⋆ 🕊","❈  🎀  {text}  🎀  ❈","✧  🎀  {text}  🎀  ✧"
+    # Mathematical / Serif / Bold / Italic / Script / Fraktur
+    "𝐟𝐮𝐫𝐲".replace("fury", "{text}"),          # bold serif lowercase
+    "𝑓𝑢𝑟𝑦".replace("fury", "{text}"),          # italic serif
+    "𝒇𝒖𝒓𝒚".replace("fury", "{text}"),          # script (cursive)
+    "𝔣𝔲𝔯𝔂".replace("fury", "{text}"),          # fraktur
+    "𝕗𝕦𝕣𝕪".replace("fury", "{text}"),          # double-struck / blackboard (style)
+    "𝖋𝖚𝖗𝖞".replace("fury", "{text}"),          # bold fraktur style
+    "𝘧𝘶𝘳𝘺".replace("fury", "{text}"),          # sans-serif italic
+    "𝙛𝙪𝙧𝙮".replace("fury", "{text}"),          # monospace-like look
+    "ｆｕｒｙ".replace("fury", "{text}"),          # fullwidth (Japanese aesthetic)
+    "𝒻𝓊𝓇𝓎".replace("fury", "{text}"),          # delicate script
+    "𝓯𝓾𝓻𝔂".replace("fury", "{text}"),          # handwritten script
+    "ꜰᴜʀʏ".replace("fury", "{text}"),          # small caps style
+    "ғᴜʀʏ".replace("fury", "{text}"),          # small caps alternate
+    "ᵈᵉᶜᵒʳᵃtive".replace("decorative", "{text}"),# placeholder-based decorative template
+    # Circled / Parenthesized / Enclosed variants (if available)
+    "⒡⒰⒭⒴".replace("⒡⒰⒭⒴", "{text}"),         # circled letters (note: might map per-letter)
+    "ⓕⓤⓡⓨ".replace("ⓕⓤⓡⓨ", "{text}"),         # circled-alt
+    "(f)(u)(r)(y)".replace("(f)(u)(r)(y)","{text}"),# parenthesized style (visual suggest)
+    # Double-struck (blackboard bold) common uppercase style
+    "𝔽𝕌ℝ𝕐".replace("FURY", "{text}"),
+    # Monospace / Typewriter
+    "𝚏𝚞𝚛𝚢".replace("fury", "{text}"),          # monospace mathematical
+    "𝙛𝙪𝙧𝙮".replace("fury", "{text}"),          # monospace alternative
+    "𝚏𝑢𝚛𝚢".replace("fury", "{text}"),
+    # Wide / spaced alphabets
+    "f u r y".replace("f u r y", "{text}"),
+    "𝚏 𝚞 𝚛 𝚢".replace("f  u  r  y", "{text}"),
+    # Small-serif variants
+    "𝘧𝘶𝘳𝘺".replace("fury", "{text}"),
+    "𝐟𝑢𝐫𝑦".replace("fury", "{text}"),
+    # bubble / double-circle-like (letters themselves are unicode)
+    "ⒻⓊⓇⓎ".replace("ⒻⓊⓇⓎ", "{text}"),
+    "🄵🅄🅁🅈".replace("🄵🅄🅁🅈", "{text}"),
+    # regional indicators (makes letters look boxed in some clients)
+    "🇫🇺🇷🇾".replace("🇫🇺🇷🇾", "{text}"),
+    # Gothic-like
+    "𝔉𝔲𝔯𝔶".replace("fury", "{text}"),
+    "𝕱𝖚𝖗𝖞".replace("fury", "{text}"),
+    # mathematical styled variants
+    "𝑭𝑼𝑹𝒀".replace("FURY", "{text}"),
+    "𝔉𝔘𝔕𝔜".replace("FURY", "{text}"),
+    # squared alphabets (if supported)
+    "🅕🅤🅡🅨".replace("🅕🅤🅡🅨", "{text}"),
+    # more script/handwritten variants
+    "𝒇𝓊𝓇𝓎".replace("fury", "{text}"),
+    "𝓯𝓾𝓻𝔂".replace("fury", "{text}"),
+    "𝓯𝓾𝓻𝓨".replace("fury", "{text}"),
+    # stylized lower/upper mixes
+    "Fᴜʀʏ".replace("Fᴜʀʏ", "{text}"),
+    "fᴜʀʏ".replace("fᴜʀʏ", "{text}"),
+    # boxed/almost-monospace
+    "ｆᴜʀʏ".replace("fury", "{text}"),
+    "Ʞᴜʀʏ".replace("fury", "{text}"),
+    # decorative small-letter alternatives
+    "ᶠᵘʳʸ".replace("fury", "{text}"),
+    "ᵠᵘʳʸ".replace("fury", "{text}"),
+    # reversed-ish / flipped (if glyphs exist)
+    "ʄuɾy".replace("ʄuɾy", "{text}"),
+    "ʄυɾϓ".replace("ʄυɾϓ", "{text}"),
+    # mathematical bold script
+    "𝓕𝓾𝓻𝔂".replace("fury", "{text}"),
+    "𝔉𝕦𝕣𝕪".replace("fury", "{text}"),
+    # stylized Latin extended variants
+    "ƒµřý".replace("ƒµřý", "{text}"),
+    "f̶u̶r̶y̶".replace("f̶u̶r̶y̶","{text}"),
+    "f̴u̴r̴y̴".replace("f̴u̴r̴y̴","{text}"),
+    "f̷u̷r̷y̷".replace("f̷u̷r̷y̷","{text}"),
+    # spaced-out and ornamental letter-forms (letters only)
+    "ＦＵＲＹ".replace("FURY", "{text}"),   # fullwidth uppercase
+    "𝔣𝐮𝔯𝕪".replace("fury", "{text}"),
+    "𝓯𝓾𝐫𝕐".replace("fury", "{text}"),
+    # additional script-like
+    "𝓕𝓾𝓻𝔂".replace("fury", "{text}"),
+    "𝕗𝕦𝕣𝕪".replace("fury", "{text}"),
+    # small-caps / cap-like stylings
+    "ᴾᴼᵂᴱᴿ".replace("POWER","{text}"),
+    # circled small letters where available
+    "ⓕⓤⓡⓨ".replace("ⓕⓤⓡⓨ","{text}"),
+    # blackletter style
+    "𝔉𝔲𝔯𝔶".replace("fury", "{text}"),
+    # stylized script alternates
+    "𝕗𝓾𝚛𝔂".replace("fury", "{text}"),
+    # more monospace-like
+    "𝙛𝚞𝚛𝚢".replace("fury", "{text}"),
+    "𝘧𝘶𝘳𝘺".replace("fury", "{text}"),
+    # other unicode alphabetic transformations
+    "ｆ𝘂ｒy".replace("fury", "{text}"),
+    "𝔣𝕦ℝ𝕐".replace("fury", "{text}"),
+    # fallback plain-template (keeps original)
+    "{text}"
 ]
 
-# Apply dynamic replacement
-for i, sample in enumerate(STATIC_FONTS, start=1):
-    TEXT_FONTS.append((f"s{i}", f"Static{i}", lambda t, s=sample: s.replace("{text}", t)))
+# Remove duplicates in STATIC_FONTS while preserving order
+seen = set()
+clean_static = []
+for s in STATIC_FONTS:
+    if s in seen: 
+        continue
+    seen.add(s)
+    clean_static.append(s)
+STATIC_FONTS = clean_static
 
-# --- generated fonts ---
+# Apply dynamic replacement: each becomes a callable that replaces {text} with user text
+for i, sample in enumerate(STATIC_FONTS, start=1):
+    # create lambda capturing sample as default arg to avoid late-binding issue
+    TEXT_FONTS.append((f"s{i}", f"Static{i}", (lambda s: (lambda t: s.replace("{text}", t)))(sample)))
+
+# --- generated fonts (procedural) ---
 for i in range(TARGET_FONTS):
     f = compose_font(i)
     TEXT_FONTS.append((str(i), f"Font{i}", f))
 
-# --- Symbol list ---
+# --- Symbol list (kept separate) ---
 SYMBOLS = ["•","‣","◦","○","●","◉","◎","◇","◆","✦","✧","✵","✶","✷","✸",
             "✹","✺","✻","✼","✽","✾","❀","❁","❂","❃","❋","✯","✰","★","☆",
             "✪","✫","✬","✭","✮","✯","✱","✲","✳","✴","✵","→","←","↑","↓"]
@@ -2551,7 +2640,7 @@ def build_keyboard(token,page,fonts,user_text,symbol_mode=False):
     rows=[]
     for fid in ids[start:end]:
         entry=next(f for f in fonts if f[0]==fid)
-        label=entry[2](user_text) if not symbol_mode else entry[2]
+        label = entry[2](user_text) if not symbol_mode else entry[2]
         if len(label)>35: label=label[:32]+"..."
         cb=f"F|{token}|{fid}|{page}"
         rows.append([InlineKeyboardButton(label,callback_data=cb)])
@@ -2569,39 +2658,52 @@ async def font_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text=" ".join(context.args)
     token=short_token()
     fonts={"items":TEXT_FONTS,"order":[f[0] for f in TEXT_FONTS]}
-    PENDING[token]={"text":text,"fonts":fonts}
+    PENDING[token]={"text":text,"fonts":fonts,"msg_id": update.message.message_id}
     kb=build_keyboard(token,0,TEXT_FONTS,text)
     await update.message.reply_text("✨ Choose a font:",reply_markup=kb)
 
 async def symbol_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token=short_token()
     fonts={"items":symbol_FONTS,"order":[f[0] for f in symbol_FONTS]}
-    PENDING[token]={"text":"","fonts":fonts,"symbol":True}
+    PENDING[token]={"text":"","fonts":fonts,"symbol":True,"msg_id": update.message.message_id}
     kb=build_keyboard(token,0,symbol_FONTS,"",symbol_mode=True)
     await update.message.reply_text("✴ Choose a symbol:",reply_markup=kb)
 
 async def font_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q=update.callback_query; await q.answer()
     data=q.data.split("|")
-    if data[0]=="C": return await q.message.delete()
+    if data[0]=="C":
+        try:
+            await q.message.delete()
+        except:
+            pass
+        return
     if data[0]=="P":
         token,page=data[1],int(data[2])
         s=PENDING.get(token)
-        if not s: return await q.answer("Expired.")
+        if not s: return await q.answer("Expired.", show_alert=True)
+        # ensure the callback belongs to the same message instance
+        if q.message.message_id != s.get("msg_id", q.message.message_id):
+            return await q.answer("These buttons belong to another /font invocation.", show_alert=True)
         text=s["text"]; fonts=s["fonts"]["items"]; sym=s.get("symbol",False)
         kb=build_keyboard(token,page,fonts,text,symbol_mode=sym)
-        await q.message.edit_reply_markup(reply_markup=kb)
+        try:
+            await q.message.edit_reply_markup(reply_markup=kb)
+        except:
+            pass
     elif data[0]=="F":
         token,kid,page=data[1],data[2],int(data[3])
         s=PENDING.get(token)
-        if not s: return await q.answer("Expired.")
+        if not s: return await q.answer("Expired.", show_alert=True)
+        if q.message.message_id != s.get("msg_id", q.message.message_id):
+            return await q.answer("These buttons belong to another /font invocation.", show_alert=True)
         fonts=s["fonts"]["items"]; sym=s.get("symbol",False)
         entry=next(f for f in fonts if f[0]==kid)
-        if sym: await q.message.reply_text(entry[2])
+        if sym:
+            await q.message.reply_text(entry[2])
         else:
             styled=entry[2](s["text"])
             await q.message.reply_text(styled)
-
 
 
 async def set_blacklist_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
