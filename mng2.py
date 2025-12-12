@@ -7618,9 +7618,8 @@ from telegram.ext import (
 
 # ------------ Config ------------
 PAGE_SIZE = 12
-BOT_TOKEN = "7852383709:AAEpuoZjpns5TfjoFKo-enuVuI0oEc_w3no"  # set this environment variable or replace with your token
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 if not BOT_TOKEN:
-    # For safety we do not embed a token in code; user can set it in env or modify here.
     pass
 
 # ------------ Helpers ------------
@@ -7631,17 +7630,10 @@ ALPHA_LO = "abcdefghijklmnopqrstuvwxyz"
 ALPHA_UP = ALPHA_LO.upper()
 
 def build_font_from_samples(sample_lo: str, sample_up: str):
-    """
-    Build a function mapping ASCII letters (a-z, A-Z) to sample characters.
-    sample_lo and sample_up must each be length 26.
-    Non-letter characters are passed through unchanged.
-    """
     if len(sample_lo) != 26 or len(sample_up) != 26:
         raise ValueError("sample_lo/sample_up must be 26 chars long (a-z / A-Z mapping).")
-
     lo_map = {ALPHA_LO[i]: sample_lo[i] for i in range(26)}
     up_map = {ALPHA_UP[i]: sample_up[i] for i in range(26)}
-
     def mapper(text: str) -> str:
         out = []
         for ch in text:
@@ -7652,7 +7644,6 @@ def build_font_from_samples(sample_lo: str, sample_up: str):
             else:
                 out.append(ch)
         return "".join(out)
-
     return mapper
 
 def identity_font(text: str) -> str:
@@ -7660,8 +7651,7 @@ def identity_font(text: str) -> str:
 
 def spaced_font(gap: int = 1):
     def f(text: str) -> str:
-        parts = list(text)
-        return (" " * gap).join(parts)
+        return (" " * gap).join(list(text))
     return f
 
 def alternate_case(text: str) -> str:
@@ -7675,45 +7665,42 @@ def alternate_case(text: str) -> str:
             out.append(c)
     return "".join(out)
 
-# ------------ Curated fonts (real Unicode alphabets only) ------------
-# Each entry: (id, name, callable)
-# sample strings must contain 26 characters for lower and uppercase sets.
-
+# ------------ Curated Real Fonts (1–23) ------------
 _fonts_temp = []
 
-# 1 Bold serif lowercase/uppercase
+# 1 Bold serif
 _fonts_temp.append(("bold", "Bold", build_font_from_samples(
     "𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳",
     "𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙"
 )))
 
-# 2 Italic
+# 2 Italic serif
 _fonts_temp.append(("italic", "Italic", build_font_from_samples(
     "𝑎𝑏𝑐𝑑𝑒𝑓𝑔𝒉𝑖𝑗𝑘𝑙𝑚𝑛𝑜𝑝𝑞𝑟𝑠𝑡𝑢𝑣𝑤𝑥𝑦𝑧",
     "𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍"
 )))
 
-# 3 Bold italic
+# 3 Bold Italic serif
 _fonts_temp.append(("bold_italic", "BoldItalic", build_font_from_samples(
     "𝒂𝒃𝒄𝒅𝒆𝒇𝒈𝒉𝒊𝒋𝒌𝒍𝒎𝒏𝒐𝒑𝒒𝒓𝒔𝒕𝒖𝒗𝒘𝒙𝒚𝒛",
     "𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁"
 )))
 
-# 4 Sans (mathematical bold-fraktur-like)
+# 4 Sans serif
 _fonts_temp.append(("sans", "Sans", build_font_from_samples(
     "𝖺𝖻𝖼𝖽𝖾𝖿𝗀𝗁𝗂𝗃𝗄𝗅𝗆𝗇𝗈𝗉𝗊𝗋𝗌𝗍𝗎𝗏𝗐𝗑𝗒𝗓",
     "𝖠𝖡𝖢𝖣𝖤𝖥𝖦𝖧𝖨𝖩𝖪𝖫𝖬𝖭𝖮𝖯𝖰𝖱𝖲𝖳𝖴𝖵𝖶𝖷𝖸𝖹"
 )))
 
-# 5 Sans Bold
+# 5 Sans bold
 _fonts_temp.append(("sans_bold", "SansBold", build_font_from_samples(
-    "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇",
+    "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘶𝘃𝘸𝘅𝘆𝘇",
     "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"
 )))
 
-# 6 Sans Italic
+# 6 Sans italic (corrected)
 _fonts_temp.append(("sans_italic", "SansItalic", build_font_from_samples(
-    "𝘢𝘣𝘤𝘥𝘦𝘧𝘨𝘩𝘪𝘥𝘪𝘫𝘬𝘭𝘮𝘯𝘰𝘱𝘲𝘳𝘴𝘵𝘶𝘷𝘸𝘹𝘺𝘻",
+    "𝘢𝘣𝘤𝘥𝘦𝘧𝘨𝘩𝘪𝘫𝘬𝘭𝘮𝘯𝘰𝘱𝘲𝘳𝘴𝘵𝘶𝘷𝘸𝘹𝘺𝘻",
     "𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡"
 )))
 
@@ -7744,92 +7731,78 @@ _fonts_temp.append(("bold_script", "BoldScript", build_font_from_samples(
 # 11 Fraktur
 _fonts_temp.append(("fraktur", "Fraktur", build_font_from_samples(
     "𝔞𝔟𝔠𝔡𝔢𝔣𝔤𝔥𝔦𝔧𝔨𝔩𝔪𝔫𝔬𝔭𝔮𝔯𝔰𝔱𝔲𝔳𝔴𝔵𝔶𝔷",
-    "𝔄𝔅ℭ𝔇𝔈𝔉𝔊𝔋ℌℑ𝔎𝔏𝔐𝔑𝔒𝔓𝔔ℜ𝔖𝔗𝔘𝔙𝔚𝔛𝔜𝔝"
+    "𝔄𝔅ℭ𝔇𝔈𝔉𝔊ℌℑ𝔎𝔏𝔐𝔑𝔒𝔓𝔔ℜ𝔖𝔗𝔘𝔙𝔚𝔛𝔜𝔝"
 )))
 
-# 12 Double-struck (blackboard bold)
+# 12 Double Struck
 _fonts_temp.append(("double", "DoubleStruck", build_font_from_samples(
     "𝕒𝕓𝕔𝕕𝕖𝕗𝕘𝕙𝕚𝕛𝕜𝕝𝕞𝕟𝕠𝕡𝕢𝕣𝕤𝕥𝕦𝕧𝕨𝕩𝕪𝕫",
     "𝔸𝔹ℂ𝔻𝔼𝔽𝔾ℍ𝕀𝕁𝕂𝕃𝕄ℕ𝕆ℙℚℝ𝕊𝕋𝕌𝕍𝕎𝕏𝕐ℤ"
 )))
 
-# 13 Small caps (approx)
+# 13 Small Caps (approx)
 _fonts_temp.append(("smallcaps", "SmallCaps", build_font_from_samples(
-    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ",
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # uppercase remains ASCII here
+    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘᴏʀsᴛᴜᴠᴡxʏᴢ",
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )))
 
-# 14 Wide (space between letters)
+# 14 Wide
 _fonts_temp.append(("wide", "Wide", spaced_font(1)))
 
-# 15 Wide-double (bigger gap)
+# 15 Wide x2
 _fonts_temp.append(("wide2", "Wide x2", spaced_font(2)))
 
-# 16 Upside-down mapping (letters approximations)
-# Note: uppercase mapping is approximate; it's okay if some uppercase remain unchanged
+# 16 Upside-down
 _fonts_temp.append(("upsidedown", "UpsideDown", build_font_from_samples(
     "ɐqɔpǝɟƃɥᴉɾʞʅɯuodbɹsʇnʌʍxʎz",
-    "∀ᗺϽᗡƎℲ⅁HIſꓘ⅂WNOԀῸᴚS⊥ՈΛMXYZ"  # some approximations for uppercase
+    "∀ᗺϽᗡƎℲ⅁HIſꓘ⅂WNOԀῸᴚS⊥ՈΛMXYZ"
 )))
 
-# 17 Circled letters (lowercase circled where available)
+# 17 Circled letters
 _fonts_temp.append(("circled", "Circled", build_font_from_samples(
     "ⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ",
     "ⒶⒷⒸⒹⒺⒻⒼⒽⒾⒿⓀⓁⓂⓃⓄⓅⓆⓇⓈⓉⓊⓋⓌⓍⓎⓏ"
 )))
 
-# 18 Parenthesized (letters inside parentheses) - uses per-letter parentheses sequences
+# 18 Parenthesized
 def parenthesized_font(text: str) -> str:
     out = []
-    for ch in text:
-        if ch.isalpha():
-            out.append(f"({ch})")
+    for c in text:
+        if c.isalpha():
+            out.append(f"({c})")
         else:
-            out.append(ch)
+            out.append(c)
     return "".join(out)
 _fonts_temp.append(("paren", "Parenthesized", parenthesized_font))
 
-# 19 Squared letters (where supported)
+# 19 Squared
 _fonts_temp.append(("squared", "Squared", build_font_from_samples(
     "🄰🄱🄲🄳🄴🄵🄶🄷🄸🄹🄺🄻🄼🄽🄾🄿🅀🅁🅂🅃🅄🅅🅆🅇🅈🅉".lower(),
     "🄰🄱🄲🄳🄴🄵🄶🄷🄸🄹🄺🄻🄼🄽🄾🄿🅀🅁🅂🅃🅄🅅🅆🅇🅈🅉"
 )))
 
-# 20 Parentheses-style smallcap-ish (uses unicode small letters where available)
+# 20 Small Alt
 _fonts_temp.append(("small_alt", "SmallAlt", build_font_from_samples(
     "ᵃᵇᶜᵈᵉᶠᵍʰᶦʲᵏˡᵐⁿᵒᵖᑫʳˢᵗᵘᵛʷˣʸᶻ",
     "ᴬᴮᶜᴰᴱᶠᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᑫᴿˢᵀᵁᵛᵂˣʸᶻ"
 )))
 
-# 21 Fancy Latin alternates (mix of tildes/diacritics)
+# 21 Fancy Gothic (valid)
 _fonts_temp.append(("fancy", "Fancy", build_font_from_samples(
     "𝔞𝔟𝔠𝔡𝔢𝔣𝔤𝔥𝔦𝔧𝔨𝔩𝔪𝔫𝔬𝔭𝔮𝔯𝔰𝔱𝔲𝔳𝔴𝔵𝔶𝔷",
     "𝔄𝔅ℭ𝔇𝔈𝔉𝔊ℌℑ𝔎𝔏𝔐𝔑𝔒𝔓𝔔ℜ𝔖𝔗𝔘𝔙𝔚𝔛𝔜ℨ"
 )))
 
-
-# 22 Mathematical bold (alternative)
+# 22 Mathematical Bold (alternative)
 _fonts_temp.append(("mathbold", "MathBold", build_font_from_samples(
-    "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇",
-    "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍"
+    "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘶𝘷𝘸𝘅𝘆𝘇",
+    "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"
 )))
 
-# 23 Alternative monospace
+# 23 Alternative Monospace
 _fonts_temp.append(("mono_alt", "MonoAlt", build_font_from_samples(
     "𝙖𝙗𝙘𝙙𝙚𝙛𝙜𝙝𝙞𝙟𝙠𝙡𝙢𝙣𝙤𝙥𝙦𝙧𝙨𝙩𝙪𝙫𝙬𝙭𝙮𝙯",
-    "𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉"
-)))
-
-# 24 Stylized small (tiny superscript-like)
-_fonts_temp.append(("supers", "Superscript", build_font_from_samples(
-    "ᵃᵇᶜᵈᵉᶠᵍʰᶦʲᵏˡᵐⁿᵒᵖᑫʳˢᵗᵘᵛʷˣʸᶻ",
-    "ᴬᴮᶜᴰᴱᶠᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᑫᴿˢᵀᵁᵛᵂˣʸᶻ"
-)))
-
-# 25 Latin extended stylings (accents)
-_fonts_temp.append(("accented", "Accented", build_font_from_samples(
-    "àáâãäåçèéêëìíîïñòóôõöùúûüýÿāēīōūȳ",
-    "ÀÁÂÃÄÅÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸĀĒĪŌŪȲ"
+    "𝙰𝙱𝙲𝙳𝙴𝙵𝙂𝙃𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉"
 )))
 
 # 26 Faux smallcaps + alternating upper/lower
