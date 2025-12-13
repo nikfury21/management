@@ -7762,7 +7762,8 @@ _fonts_temp.append(("bold_script", "BoldScript", build_font_from_samples(
 # 11 Fraktur
 _fonts_temp.append(("fraktur", "Fraktur", build_font_from_samples(
     "𝔞𝔟𝔠𝔡𝔢𝔣𝔤𝔥𝔦𝔧𝔨𝔩𝔪𝔫𝔬𝔭𝔮𝔯𝔰𝔱𝔲𝔳𝔴𝔵𝔶𝔷",
-    "𝔄𝔅ℭ𝔇𝔈𝔉𝔊ℌℑ𝔎𝔏𝔐𝔑𝔒𝔓𝔔ℜ𝔖𝔗𝔘𝔙𝔚𝔛𝔜𝔝"
+    "𝔄𝔅ℭ𝔇𝔈𝔉𝔊ℌℑ𝔎𝔏𝔐𝔑𝔒𝔓𝔔ℜ𝔖𝔗𝔘𝔙𝔚𝔛𝔜ℨ"
+
 )))
 
 # 12 Double Struck
@@ -7773,9 +7774,10 @@ _fonts_temp.append(("double", "DoubleStruck", build_font_from_samples(
 
 # 13 Small Caps (approx)
 _fonts_temp.append(("smallcaps", "SmallCaps", build_font_from_samples(
-    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘᴏʀsᴛᴜᴠᴡxʏᴢ",
+    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ",
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )))
+
 
 # 14 Wide
 _fonts_temp.append(("wide", "Wide", spaced_font(1)))
