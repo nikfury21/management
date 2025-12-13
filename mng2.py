@@ -857,7 +857,14 @@ query ($id: Int, $search: String) {
     }
     siteUrl
     characters(perPage: 10) {
-      edges {
+    pageInfo {
+        total
+        hasNextPage
+    }
+    edges {
+   
+  
+
         role
         node {
           id
@@ -869,6 +876,11 @@ query ($id: Int, $search: String) {
           }
           siteUrl
         }
+      }
+    }
+    relations {
+      edges {
+        relationType
       }
     }
   }
@@ -2255,8 +2267,17 @@ async def anime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     duration = f"{anime['duration']} min/ep" if anime.get("duration") else "N/A"
     status = anime.get("status", "N/A")
     episodes = anime.get("episodes", "N/A")
+    
+
+    relations = anime.get("relations", {}).get("edges", [])
+    total_seasons = 1 + len(
+        [r for r in relations if r.get("relationType") in ("PREQUEL", "SEQUEL")]
+    )
+
     if status == "FINISHED" and episodes != "N/A":
         status = f"{status} | {episodes} eps"
+
+
 
 
     # Next airing info
@@ -2290,6 +2311,7 @@ async def anime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"➤ <b>TYPE:</b> <code>{atype}</code>\n"
         f"➤ <b>SCORE:</b> <code>{score}</code>\n"
         f"➤ <b>DURATION:</b> <code>{duration}</code>\n"
+        f"➤ <b>TOTAL SEASONS:</b> <code>{total_seasons}</code>\n"
         f"➤ <b>STATUS:</b> <code>{status}</code>\n"
         f"➤ <b>NEXT AIRING:</b> <code>{next_airing}</code>\n"
         f"➤ <b>GENRES:</b> <code>{genres}</code>\n"
@@ -2434,11 +2456,11 @@ async def set_blacklist_mode(update: Update, context: ContextTypes.DEFAULT_TYPE)
         blacklist_modes[chat_id] = (mode, duration_str)
         return await update.message.reply_text(
             f"✅ Blacklist mode set to *Temporary Mute* for {duration_str}.",
-            parse_mode=ParseMode.MARKDOWN,
+            parse_mode="HTML",
         )
     else:
         blacklist_modes[chat_id] = mode
-        return await update.message.reply_text(f"✅ Blacklist mode set to *{mode.title()}*.", parse_mode=ParseMode.MARKDOWN)
+        return await update.message.reply_text(f"✅ Blacklist mode set to *{mode.title()}*.", parse_mode="HTML")
 
 
 
@@ -3083,16 +3105,6 @@ def google_image_search(query, count=5):
         logging.warning(f"Google search failed: {e}")
         return []
 
-def lexica_search(query, count=5):
-    """Fallback for art/anime images using lexica.art (if Google misses)"""
-    try:
-        r = requests.get(f"https://lexica.art/api/v1/search?q={query}", timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        return [img["src"] for img in data.get("images", [])[:count]]
-    except Exception as e:
-        logging.warning(f"Lexica search failed: {e}")
-        return []
 
 
 def download_and_prepare_image(url: str, timeout: int = 10):
@@ -3203,20 +3215,29 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_id = user.id
+    dc_id = (user_id % 5) + 1
 
-    # Presence
-    presence = "Member"
-    if chat.type in ["group", "supergroup"]:
+    # -------- MEMBER CHECK (SINGLE SOURCE OF TRUTH) --------
+    member = None
+    present_here = "No"
+    presence = "Unknown"
+
+    if chat.type in ("group", "supergroup"):
         try:
             member = await chat.get_member(user_id)
+            present_here = "Yes"
             if member.status in ("creator", "owner"):
                 presence = "Owner"
             elif member.status == "administrator":
                 presence = "Admin"
+            else:
+                presence = "Member"
         except Exception:
+            member = None
+            present_here = "No"
             presence = "Unknown"
 
-    # Bio
+    # -------- BIO (GLOBAL) --------
     bio = "No bio available."
     try:
         full_user = await bot.get_chat(user_id)
@@ -3225,46 +3246,48 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
-    # Profile photos
-    profile_photos = await bot.get_user_profile_photos(user_id)
-    total_photos = profile_photos.total_count if profile_photos else 0
+    # -------- PROFILE PHOTOS --------
+    try:
+        profile_photos = await bot.get_user_profile_photos(user_id)
+        total_photos = profile_photos.total_count
+    except Exception:
+        profile_photos = None
+        total_photos = 0
 
-    # Other flags
-    approved = "Yes" if user_id in approved_users else "No"
+    # -------- FLAGS --------
+    is_admin_flag = member and member.status in ("administrator", "creator")
+    approved = "Yes" if (
+        user_id in approved_users.get(chat.id, set()) or is_admin_flag
+    ) else "No"
+
     afk_status = "User is currently afk!" if user_id in afk_users else "User is not afk!"
 
-    banned = "No"
-    try:
-        member_status = await chat.get_member(user_id)
-        if member_status.status == "kicked":
-            banned = "Yes"
-    except Exception:
-        banned = "Yes"
+    # -------- BANNED / MUTED --------
+    if member:
+        banned = "Yes" if member.status in ("kicked", "banned") else "No"
+        muted = "Yes" if getattr(member, "can_send_messages", True) is False else "No"
+    else:
+        banned = "N/A"
+        muted = "N/A"
 
-    muted = "No"
-    try:
-        member_status = await chat.get_member(user_id)
-        if member_status.can_send_messages is False:
-            muted = "Yes"
-    except Exception:
-        muted = "No"
-
-    # 🧩 Escape user input for HTML
+    # -------- ESCAPE --------
     name = escape(f"{user.first_name or ''} {user.last_name or ''}".strip())
     username = f"@{escape(user.username)}" if user.username else "N/A"
     mention = f"<a href='tg://user?id={user_id}'>{escape(user.first_name or 'User')}</a>"
     bio = escape(bio)
     presence = escape(presence)
 
-    # 🧾 Message text
+    # -------- MESSAGE --------
     message_text = (
         "⌬ ᴜsᴇʀ ɪɴғᴏʀᴍᴀᴛɪᴏɴ ⌬\n"
         "•────────[×]────────•\n\n"
         f"✧ ᴜꜱᴇʀɪᴅ : {user_id}\n"
+        f"✧ ᴅᴄ ɪᴅ : DC {dc_id}\n"
         f"✧ ɴᴀᴍᴇ : {name}\n"
         f"✧ ᴜꜱᴇʀɴᴀᴍᴇ : {username}\n"
         f"✧ ᴘʀᴇꜱᴇɴᴄᴇ : {presence}\n"
-        f"✧ ᴍᴇɴᴛɪᴏɴ : {mention}\n"
+        + (f"✧ ᴘʀᴇꜱᴇɴᴛ ʜᴇʀᴇ : {present_here}\n" if present_here == "No" else "")
+        + f"✧ ᴍᴇɴᴛɪᴏɴ : {mention}\n"
         f"✧ ʙɪᴏ : {bio}\n"
         f"✧ ᴘʀᴏꜰɪʟᴇ ᴘʜᴏᴛᴏꜱ : {total_photos}\n\n"
         "•────────[×]────────•\n\n"
@@ -3275,9 +3298,9 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "•────────[×]────────•"
     )
 
-    # 🖼 Send with photo if available
+    # -------- SEND --------
     photo_file = None
-    if total_photos > 0:
+    if profile_photos and total_photos > 0:
         try:
             photo = profile_photos.photos[0][-1]
             file = await bot.get_file(photo.file_id)
@@ -3302,23 +3325,6 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             disable_web_page_preview=True,
             disable_notification=True,
         )
-
-# ---------------- MOVIE COMMAND ----------------
-async def movie_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Usage: /movie <movie name>")
-        return
-
-    query = " ".join(context.args)
-    url = f"http://www.omdbapi.com/?t={query}&plot=full&apikey={OMDB_API_KEY}"
-    response = requests.get(url).json()
-
-    if response.get("Response") == "False":
-        await update.message.reply_text("❌ Movie not found.")
-        return
-
-    await send_movie_page(update, context, response)
-
 
 # ---------------- MOVIE PAGE ----------------
 async def send_movie_page(update_or_query, context, movie, edit=False):
@@ -3815,13 +3821,25 @@ async def promote(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await bot.promote_chat_member(
             chat.id,
             user_id,
+            # keep change-info, delete, invite, restrict, pin
             can_change_info=True,
             can_delete_messages=True,
             can_invite_users=True,
             can_restrict_members=True,
             can_pin_messages=True,
+
+            # extra permissions to cover voice/video/stories etc.
+            # some names are API/backward-compatible; setting both primary candidates:
+            can_manage_video_chats=True,
+            can_manage_voice_chats=True,      # older name — harmless if API ignores it
+            can_post_messages=True,           # for channels/groups where applicable
+            can_edit_messages=True,           # when the admin can edit messages
+            can_manage_topics=True,           # forum topic management (if group supports it)
+
+            # IMPORTANT: do NOT allow adding new admins
             can_promote_members=False,
         )
+
         # Set custom title if supported
         if title:
             try:
@@ -4053,7 +4071,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = " is already admin, they can't be approved."
         await update.message.reply_text(
             f"{mention}{escape_md(text)}", 
-            parse_mode=ParseMode.MARKDOWN_V2
+            parse_mode="MarkdownV2"
         )
         return
 
@@ -4063,7 +4081,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = f"{format_name(user)} approved."
     await update.message.reply_text(
         escape_md(text),
-        parse_mode=ParseMode.MARKDOWN_V2
+        parse_mode="MarkdownV2"
     )
 
 
@@ -4084,7 +4102,7 @@ async def unapprove(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = " is an admin, they can't be unapproved."
         await update.message.reply_text(
             f"{mention}{escape_md(text)}", 
-            parse_mode=ParseMode.MARKDOWN_V2
+            parse_mode="MarkdownV2"
         )
         return
 
@@ -4094,7 +4112,7 @@ async def unapprove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = f"{format_name(user)} unapproved."
     await update.message.reply_text(
         escape_md(text),
-        parse_mode=ParseMode.MARKDOWN_V2
+        parse_mode="MarkdownV2"
     )
 
 
@@ -5993,7 +6011,7 @@ async def translate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             f"**Translated ({target_lang}):**\n{translated}",
-            parse_mode=ParseMode.HTML
+            parse_mode="HTML"
         )
     except Exception as e:
         await update.message.reply_text(f"Error translating: {e}")
@@ -6065,7 +6083,8 @@ async def pp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         from PIL import Image
         image = Image.open(file_path)
-        prompt = ["Describe this image clearly and briefly:", image]
+        prompt = ["Identify the main object or person in this image and describe it briefly in 1–2 lines:", image]
+
 
         # Use safe_generate (from mng2.py) to auto-rotate keys
         response = safe_generate(gemini_model, prompt)
@@ -6083,7 +6102,9 @@ async def pp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- Format and send result ---
     clean_description = " ".join(description.split())
+    clean_description = clean_description[:300]
     safe_description = boldify(clean_description)
+
 
     search_query = quote_plus(clean_description)
     buttons = InlineKeyboardMarkup(
@@ -6091,11 +6112,11 @@ async def pp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await message.reply_text(
-        f"Looks like:\n{safe_description}",
+        f"🖼 <b>Identified:</b>\n{safe_description}",
         reply_markup=buttons,
         parse_mode="HTML"
-
     )
+
 
     os.remove(file_path)
 
@@ -6288,8 +6309,17 @@ async def anime_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         duration = f"{anime['duration']} min/ep" if anime.get("duration") else "N/A"
         status = anime.get("status", "N/A")
         episodes = anime.get("episodes", "N/A")
+        
+
+        relations = anime.get("relations", {}).get("edges", [])
+        total_seasons = 1 + len(
+            [r for r in relations if r.get("relationType") in ("PREQUEL", "SEQUEL")]
+        )
+
         if status == "FINISHED" and episodes != "N/A":
             status = f"{status} | {episodes} eps"
+
+
 
         genres = ", ".join(anime.get("genres", [])[:5]) or "N/A"
         tags = ", ".join(tag["name"] for tag in anime.get("tags", [])[:8]) or "N/A"
@@ -6307,6 +6337,7 @@ async def anime_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"➤ <b>TYPE:</b> <code>{atype}</code>\n"
             f"➤ <b>SCORE:</b> <code>{score}</code>\n"
             f"➤ <b>DURATION:</b> <code>{duration}</code>\n"
+            f"➤ <b>TOTAL SEASONS:</b> <code>{total_seasons}</code>\n"
             f"➤ <b>STATUS:</b> <code>{status}</code>\n"
             f"➤ <b>GENRES:</b> <code>{genres}</code>\n"
             f"➤ <b>TAGS:</b> <code>{tags}</code>\n"
@@ -8253,4 +8284,3 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
-
