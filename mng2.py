@@ -7649,7 +7649,7 @@ from telegram.ext import (
 
 # ------------ Config ------------
 PAGE_SIZE = 12
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+BOT_TOKEN = os.getenv("MNG_BOT_TOKEN", "")
 if not BOT_TOKEN:
     pass
 
@@ -7668,12 +7668,7 @@ def build_font_from_samples(sample_lo: str, sample_up: str):
     def mapper(text: str) -> str:
         out = []
         for ch in text:
-            if ch in lo_map:
-                out.append(lo_map[ch])
-            elif ch in up_map:
-                out.append(up_map[ch])
-            else:
-                out.append(ch)
+            out.append(lo_map.get(ch, up_map.get(ch, ch)))
         return "".join(out)
     return mapper
 
@@ -7682,12 +7677,11 @@ def identity_font(text: str) -> str:
 
 def spaced_font(gap: int = 1):
     def f(text: str) -> str:
-        return (" " * gap).join(list(text))
+        return (" " * gap).join(text)
     return f
 
 def alternate_case(text: str) -> str:
-    out = []
-    toggle = False
+    out, toggle = [], False
     for c in text:
         if c.isalpha():
             out.append(c.upper() if toggle else c.lower())
@@ -7696,398 +7690,139 @@ def alternate_case(text: str) -> str:
             out.append(c)
     return "".join(out)
 
-# ------------ Curated Real Fonts (1–23) ------------
-_fonts_temp = []
-
-# 1 Bold serif
-_fonts_temp.append(("bold", "Bold", build_font_from_samples(
-    "𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳",
-    "𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙"
-)))
-
-# 2 Italic serif
-_fonts_temp.append(("italic", "Italic", build_font_from_samples(
-    "𝑎𝑏𝑐𝑑𝑒𝑓𝑔𝒉𝑖𝑗𝑘𝑙𝑚𝑛𝑜𝑝𝑞𝑟𝑠𝑡𝑢𝑣𝑤𝑥𝑦𝑧",
-    "𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍"
-)))
-
-# 3 Bold Italic serif
-_fonts_temp.append(("bold_italic", "BoldItalic", build_font_from_samples(
-    "𝒂𝒃𝒄𝒅𝒆𝒇𝒈𝒉𝒊𝒋𝒌𝒍𝒎𝒏𝒐𝒑𝒒𝒓𝒔𝒕𝒖𝒗𝒘𝒙𝒚𝒛",
-    "𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁"
-)))
-
-# 4 Sans serif
-_fonts_temp.append(("sans", "Sans", build_font_from_samples(
-    "𝖺𝖻𝖼𝖽𝖾𝖿𝗀𝗁𝗂𝗃𝗄𝗅𝗆𝗇𝗈𝗉𝗊𝗋𝗌𝗍𝗎𝗏𝗐𝗑𝗒𝗓",
-    "𝖠𝖡𝖢𝖣𝖤𝖥𝖦𝖧𝖨𝖩𝖪𝖫𝖬𝖭𝖮𝖯𝖰𝖱𝖲𝖳𝖴𝖵𝖶𝖷𝖸𝖹"
-)))
-
-# 5 Sans bold
-_fonts_temp.append(("sans_bold", "SansBold", build_font_from_samples(
-    "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘶𝘃𝘸𝘅𝘆𝘇",
-    "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"
-)))
-
-# 6 Sans italic (corrected)
-_fonts_temp.append(("sans_italic", "SansItalic", build_font_from_samples(
-    "𝘢𝘣𝘤𝘥𝘦𝘧𝘨𝘩𝘪𝘫𝘬𝘭𝘮𝘯𝘰𝘱𝘲𝘳𝘴𝘵𝘶𝘷𝘸𝘹𝘺𝘻",
-    "𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡"
-)))
-
-# 7 Monospace
-_fonts_temp.append(("mono", "Mono", build_font_from_samples(
-    "𝚊𝚋𝚌𝚍𝚎𝚏𝚐𝚑𝚒𝚓𝚔𝚕𝚖𝚗𝚘𝚙𝚚𝚛𝚜𝚝𝚞𝚟𝚠𝚡𝚢𝚣",
-    "𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉"
-)))
-
-# 8 Fullwidth
-_fonts_temp.append(("fullwidth", "Fullwidth", build_font_from_samples(
-    "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ",
-    "ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ"
-)))
-
-# 9 Script (cursive)
-_fonts_temp.append(("script", "Script", build_font_from_samples(
-    "𝒶𝒷𝒸𝒹ℯ𝒻ℊ𝒽𝒾𝒿𝓀𝓁𝓂𝓃ℴ𝓅𝓆𝓇𝓈𝓉𝓊𝓋𝓌𝓍𝓎𝓏",
-    "𝒜𝐵𝒞𝒟ℰℱ𝒢𝐻ℐ𝒥𝒦𝐿𝑀𝒩𝒪𝒫𝒬ℛ𝒮𝒯𝒰𝒱𝒲𝒳𝒴𝒵"
-)))
-
-# 10 Bold Script
-_fonts_temp.append(("bold_script", "BoldScript", build_font_from_samples(
-    "𝓪𝓫𝓬𝓭𝓮𝓯𝓰𝓱𝓲𝓳𝓴𝓵𝓶𝓷𝓸𝓹𝓺𝓻𝓼𝓽𝓾𝓿𝔀𝔁𝔂𝔃",
-    "𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩"
-)))
-
-# 11 Fraktur
-_fonts_temp.append(("fraktur", "Fraktur", build_font_from_samples(
-    "𝖆𝖇𝖈𝖉𝖊𝖋𝖌𝖍𝖎𝖏𝖐𝖑𝖒𝖓𝖔𝖕𝖖𝖗𝖘𝖙𝖚𝖛𝖜𝖝𝖞𝖟",
-    "𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅"
-)))
-
-
-# 12 Double Struck
-_fonts_temp.append(("double", "DoubleStruck", build_font_from_samples(
-    "𝕒𝕓𝕔𝕕𝕖𝕗𝕘𝕙𝕚𝕛𝕜𝕝𝕞𝕟𝕠𝕡𝕢𝕣𝕤𝕥𝕦𝕧𝕨𝕩𝕪𝕫",
-    "𝔸𝔹ℂ𝔻𝔼𝔽𝔾ℍ𝕀𝕁𝕂𝕃𝕄ℕ𝕆ℙℚℝ𝕊𝕋𝕌𝕍𝕎𝕏𝕐ℤ"
-)))
-
-# 13 Small Caps (approx)
-_fonts_temp.append(("smallcaps", "SmallCaps", build_font_from_samples(
-    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ",
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-)))
-
-
-# 14 Wide
-_fonts_temp.append(("wide", "Wide", spaced_font(1)))
-
-# 15 Wide x2
-_fonts_temp.append(("wide2", "Wide x2", spaced_font(2)))
-
-# 16 Upside-down
-_fonts_temp.append(("upsidedown", "UpsideDown", build_font_from_samples(
-    "ɐqɔpǝɟƃɥᴉɾʞʅɯuodbɹsʇnʌʍxʎz",
-    "∀ᗺϽᗡƎℲ⅁HIſꓘ⅂WNOԀῸᴚS⊥ՈΛMXYZ"
-)))
-
-# 17 Circled letters
-_fonts_temp.append(("circled", "Circled", build_font_from_samples(
-    "ⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ",
-    "ⒶⒷⒸⒹⒺⒻⒼⒽⒾⒿⓀⓁⓂⓃⓄⓅⓆⓇⓈⓉⓊⓋⓌⓍⓎⓏ"
-)))
-
-# 18 Parenthesized
-def parenthesized_font(text: str) -> str:
-    out = []
-    for c in text:
-        if c.isalpha():
-            out.append(f"({c})")
-        else:
-            out.append(c)
-    return "".join(out)
-_fonts_temp.append(("paren", "Parenthesized", parenthesized_font))
-
-# 19 Squared
-_fonts_temp.append(("squared", "Squared", build_font_from_samples(
-    "🄰🄱🄲🄳🄴🄵🄶🄷🄸🄹🄺🄻🄼🄽🄾🄿🅀🅁🅂🅃🅄🅅🅆🅇🅈🅉".lower(),
-    "🄰🄱🄲🄳🄴🄵🄶🄷🄸🄹🄺🄻🄼🄽🄾🄿🅀🅁🅂🅃🅄🅅🅆🅇🅈🅉"
-)))
-
-# 20 Small Alt
-_fonts_temp.append(("small_alt", "SmallAlt", build_font_from_samples(
-    "ᵃᵇᶜᵈᵉᶠᵍʰᶦʲᵏˡᵐⁿᵒᵖᑫʳˢᵗᵘᵛʷˣʸᶻ",
-    "ᴬᴮᶜᴰᴱᶠᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᑫᴿˢᵀᵁᵛᵂˣʸᶻ"
-)))
-
-# 21 Fancy Gothic (valid)
-_fonts_temp.append(("fancy", "Fancy", build_font_from_samples(
-    "𝔞𝔟𝔠𝔡𝔢𝔣𝔤𝔥𝔦𝔧𝔨𝔩𝔪𝔫𝔬𝔭𝔮𝔯𝔰𝔱𝔲𝔳𝔴𝔵𝔶𝔷",
-    "𝔄𝔅ℭ𝔇𝔈𝔉𝔊ℌℑ𝔎𝔏𝔐𝔑𝔒𝔓𝔔ℜ𝔖𝔗𝔘𝔙𝔚𝔛𝔜ℨ"
-)))
-
-# 22 Mathematical Bold (alternative)
-_fonts_temp.append(("mathbold", "MathBold", build_font_from_samples(
-    "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘶𝘷𝘸𝘅𝘆𝘇",
-    "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"
-)))
-
-# 23 Alternative Monospace
-_fonts_temp.append(("mono_alt", "MonoAlt", build_font_from_samples(
-    "𝙖𝙗𝙘𝙙𝙚𝙛𝙜𝙝𝙞𝙟𝙠𝙡𝙢𝙣𝙤𝙥𝙦𝙧𝙨𝙩𝙪𝙫𝙬𝙭𝙮𝙯",
-    "𝙰𝙱𝙲𝙳𝙴𝙵𝙂𝙃𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉"
-)))
-
-# 26 Faux smallcaps + alternating upper/lower
-_fonts_temp.append(("alt_caps", "AltCaps", lambda t: "".join(
-    (c.upper() if i % 2 == 0 and c.isalpha() else c.lower()) for i, c in enumerate(t)
-)))
-
-# 27 Reverse (mirror) - reverse string (not letter transformation but is a "style")
 def reversed_font(text: str) -> str:
     return text[::-1]
-_fonts_temp.append(("reversed", "Reversed", reversed_font))
 
-# 28 Accented combining mark overlay (letters only; uses combining characters)
+def parenthesized_font(text: str) -> str:
+    return "".join(f"({c})" if c.isalpha() else c for c in text)
+
 def comb_overlay(text: str) -> str:
-    # add combining long stroke overlay (U+0336) after each letter to strike-through letter shapes
-    # Note: combining characters are still letter-only transformations (no emoji)
-    overlay = "\u0336"
-    out = []
-    for c in text:
-        if c.isalpha():
-            out.append(c + overlay)
-        else:
-            out.append(c)
-    return "".join(out)
-_fonts_temp.append(("strike_overlay", "StrikeOverlay", comb_overlay))
+    return "".join(c + "\u0336" if c.isalpha() else c for c in text)
 
-# 29 Dotting (add combining dot below U+0323)
 def comb_dot(text: str) -> str:
-    dot = "\u0323"
-    out = []
-    for c in text:
-        if c.isalpha():
-            out.append(c + dot)
-        else:
-            out.append(c)
-    return "".join(out)
-_fonts_temp.append(("dot_below", "DotBelow", comb_dot))
+    return "".join(c + "\u0323" if c.isalpha() else c for c in text)
 
-# 30 Tilde overlay (combining tilde U+0334)
 def comb_tilde(text: str) -> str:
-    t = "\u0334"
-    out = []
-    for c in text:
-        if c.isalpha():
-            out.append(c + t)
-        else:
-            out.append(c)
-    return "".join(out)
-_fonts_temp.append(("tilde_overlay", "TildeOverlay", comb_tilde))
+    return "".join(c + "\u0334" if c.isalpha() else c for c in text)
 
-# 31 Tiny caps using Unicode modifier letters where possible (approx)
-_fonts_temp.append(("tiny", "Tiny", build_font_from_samples(
-    "ᵃᵇᶜᵈᵉᶠᵍʰᶦʲᵏˡᵐⁿᵒᵖᑫʳˢᵗᵘᵛʷˣʸᶻ",
-    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ"
-)))
+# ------------ Fonts ------------
+_fonts_temp = []
 
-# More fonts could be added here (make sure each is unique and letter-only). We'll dedupe next.
+_fonts_temp += [
+    ("bold", "Bold", build_font_from_samples(
+        "𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳",
+        "𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙"
+    )),
+    ("italic", "Italic", build_font_from_samples(
+        "𝑎𝑏𝑐𝑑𝑒𝑓𝑔𝒉𝑖𝑗𝑘𝑙𝑚𝑛𝑜𝑝𝑞𝑟𝑠𝑡𝑢𝑣𝑤𝑥𝑦𝑧",
+        "𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍"
+    )),
+    ("bold_italic", "BoldItalic", build_font_from_samples(
+        "𝒂𝒃𝒄𝒅𝒆𝒇𝒈𝒉𝒊𝒋𝒌𝒍𝒎𝒏𝒐𝒑𝒒𝒓𝒔𝒕𝒖𝒗𝒘𝒙𝒚𝒛",
+        "𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁"
+    )),
+    ("sans", "Sans", build_font_from_samples(
+        "𝖺𝖻𝖼𝖽𝖾𝖿𝗀𝗁𝗂𝗃𝗄𝗅𝗆𝗇𝗈𝗉𝗊𝗋𝗌𝗍𝗎𝗏𝗐𝗑𝗒𝗓",
+        "𝖠𝖡𝖢𝖣𝖤𝖥𝖦𝖧𝖨𝖩𝖪𝖫𝖬𝖭𝖮𝖯𝖰𝖱𝖲𝖳𝖴𝖵𝖶𝖷𝖸𝖹"
+    )),
+    ("sans_bold", "SansBold", build_font_from_samples(
+        "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘶𝘃𝘸𝘅𝘆𝘇",
+        "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"
+    )),
+    ("mono", "Mono", build_font_from_samples(
+        "𝚊𝚋𝚌𝚍𝚎𝚏𝚐𝚑𝚒𝚓𝚔𝚕𝚖𝚗𝚘𝚙𝚚𝚛𝚜𝚝𝚞𝚟𝚠𝚡𝚢𝚣",
+        "𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉"
+    )),
+    ("fullwidth", "Fullwidth", build_font_from_samples(
+        "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ",
+        "ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ"
+    )),
+    ("double", "DoubleStruck", build_font_from_samples(
+        "𝕒𝕓𝕔𝕕𝕖𝕗𝕘𝕙𝕚𝕛𝕜𝕝𝕞𝕟𝕠𝕡𝕢𝕣𝕤𝕥𝕦𝕧𝕨𝕩𝕪𝕫",
+        "𝔸𝔹ℂ𝔻𝔼𝔽𝔾ℍ𝕀𝕁𝕂𝕃𝕄ℕ𝕆ℙℚℝ𝕊𝕋𝕌𝕍𝕎𝕏𝕐ℤ"
+    )),
+]
 
-# ------------ Deduplicate & produce final FONTS list ------------
-_FONTS = []
-_seen_names = set()
-_seen_serialized = set()
+# Transform-based styles (SAFE)
+_fonts_temp += [
+    ("wide", "Wide", spaced_font(1)),
+    ("wide2", "Wide x2", spaced_font(2)),
+    ("alt_caps", "AltCaps", alternate_case),
+    ("reversed", "Reversed", reversed_font),
+    ("paren", "Parenthesized", parenthesized_font),
+    ("strike_overlay", "StrikeOverlay", comb_overlay),
+    ("dot_below", "DotBelow", comb_dot),
+    ("tilde_overlay", "TildeOverlay", comb_tilde),
+]
 
-def serialize_font_rep(font_callable):
-    """Attempt to create a small signature for callable to compare uniqueness.
-    For pure mapping functions built from samples we can try mapping 'abc...xyz' and use result.
-    For lambdas and other callables we will still attempt calling."""
-    try:
-        sample = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        out = font_callable(sample)
-        return out
-    except Exception:
-        return None
-
+# ------------ Deduplicate ------------
+_FONTS, seen = [], set()
 for fid, name, fn in _fonts_temp:
-    # avoid duplicated names
-    if name in _seen_names:
+    if name in seen:
         continue
-    sig = serialize_font_rep(fn)
-    if sig is None:
-        # include but ensure no name duplicate
-        _FONTS.append((fid, name, fn))
-        _seen_names.add(name)
-        continue
-    if sig in _seen_serialized:
-        # duplicate visual result -> skip
-        continue
-    _seen_serialized.add(sig)
+    seen.add(name)
     _FONTS.append((fid, name, fn))
-    _seen_names.add(name)
 
-# Safety: ensure we have at least identity font
-if not any(fid == "identity" for fid, _, _ in _FONTS):
-    _FONTS.insert(0, ("identity", "Plain", identity_font))
-
-# Expose FONTS
+_FONTS.insert(0, ("identity", "Plain", identity_font))
 FONTS = _FONTS
 
-# ------------ Session storage for pending interactions ------------
-PENDING = {}  # token -> {"text": str, "msg_id": int}
+# ------------ State ------------
+PENDING = {}
 
-# ------------ Keyboard / UI builder ------------
+# ------------ Keyboard ------------
 def build_keyboard(token: str, page: int, text: str):
-    total = len(FONTS)
-    total_pages = math.ceil(total / PAGE_SIZE) if total > 0 else 1
-    start = page * PAGE_SIZE
-    end = min(start + PAGE_SIZE, total)
+    total_pages = math.ceil(len(FONTS) / PAGE_SIZE)
+    start, end = page * PAGE_SIZE, (page + 1) * PAGE_SIZE
     rows = []
 
-    # For each font on the page, create a button with the styled text as label.
     for fid, name, fn in FONTS[start:end]:
-        try:
-            label = fn(text)
-        except Exception:
-            label = fn(text) if callable(fn) else text
-        # Telegram button label max ~64 characters; keep concise
-        if len(label) > 36:
-            label = label[:33] + "..."
-        # callback_data layout: ACTION|token|fid|page
-        cb = f"F|{token}|{fid}|{page}"
-        rows.append([InlineKeyboardButton(label, callback_data=cb)])
+        label = fn(text)
+        label = label[:33] + "..." if len(label) > 36 else label
+        rows.append([InlineKeyboardButton(label, callback_data=f"F|{token}|{fid}|{page}")])
 
-    # navigation
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton("⬅ Prev", callback_data=f"P|{token}|{page-1}"))
-    if end < total:
+    if end < len(FONTS):
         nav.append(InlineKeyboardButton("Next ➡", callback_data=f"P|{token}|{page+1}"))
     if nav:
         rows.append(nav)
 
-    # info + close
     rows.append([InlineKeyboardButton(f"Page {page+1}/{total_pages}", callback_data="none")])
     rows.append([InlineKeyboardButton("❌ Close", callback_data=f"C|{token}")])
-
     return InlineKeyboardMarkup(rows)
 
-# ------------ Command Handlers ------------
+# ------------ Commands ------------
 async def font_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Usage: /font your text"""
     if not context.args:
         await update.message.reply_text("Usage: /font <text>")
         return
-
-    text = " ".join(context.args).strip()
-    if text == "":
-        await update.message.reply_text("Please provide some text.")
-        return
-
+    text = " ".join(context.args)
     token = short_token()
-    PENDING[token] = {"text": text, "msg_id": update.message.message_id}
-    kb = build_keyboard(token, 0, text)
-    await update.message.reply_text("✨ Choose a font:", reply_markup=kb)
+    PENDING[token] = text
+    await update.message.reply_text("✨ Choose a font:", reply_markup=build_keyboard(token, 0, text))
 
-async def symbol_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends single-character symbol buttons (kept minimal)."""
-    # Minimal symbol list (separate from fonts) — user said fonts = letters, but keep useful symbols
-    symbols = ["•", "●", "○", "★", "☆", "✦", "➤", "→", "←", "↑", "↓"]
-    token = short_token()
-    PENDING[token] = {"text": "", "msg_id": update.message.message_id, "symbol": True}
-    rows = []
-    for s in symbols:
-        rows.append([InlineKeyboardButton(s, callback_data=f"S|{token}|{s}")])
-    rows.append([InlineKeyboardButton("❌ Close", callback_data=f"C|{token}")])
-    kb = InlineKeyboardMarkup(rows)
-    await update.message.reply_text("✴ Choose a symbol:", reply_markup=kb)
-
-# ------------ Callback (button) handler ------------
 async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    if not q or not q.data:
-        return
-    await q.answer()  # acknowledge
-
+    await q.answer()
     parts = q.data.split("|")
-    action = parts[0]
 
-    # Close action
-    if action == "C":
-        token = parts[1] if len(parts) > 1 else None
-        try:
-            await q.message.delete()
-        except Exception:
-            pass
-        if token and token in PENDING:
-            del PENDING[token]
+    if parts[0] == "C":
+        await q.message.delete()
+        PENDING.pop(parts[1], None)
         return
 
-    # None action (info)
-    if action == "none":
+    if parts[0] == "P":
+        await q.message.edit_reply_markup(
+            reply_markup=build_keyboard(parts[1], int(parts[2]), PENDING[parts[1]])
+        )
         return
 
-    # Symbol click
-    if action == "S":
-        token = parts[1]
-        symbol = parts[2] if len(parts) > 2 else ""
-        await q.message.reply_text(symbol)
-        # optionally expire
-        PENDING.pop(token, None)
-        return
-
-    # Pagination
-    if action == "P":
-        token = parts[1]
-        page = int(parts[2])
-        state = PENDING.get(token)
-        if not state:
-            await q.answer("Expired.", show_alert=True)
-            return
-        # ensure same message id (prevents cross-interaction)
-        if q.message.message_id != state.get("msg_id", q.message.message_id):
-            await q.answer("These buttons belong to another /font invocation.", show_alert=True)
-            return
-        kb = build_keyboard(token, page, state["text"])
-        try:
-            await q.message.edit_reply_markup(reply_markup=kb)
-        except Exception:
-            # fallback: send new message with keyboard
-            await q.message.reply_text("✨ Choose a font:", reply_markup=kb)
-        return
-
-    # Font click
-    if action == "F":
-        token = parts[1]
-        fid = parts[2]
-        page = int(parts[3]) if len(parts) > 3 else 0
-        state = PENDING.get(token)
-        if not state:
-            await q.answer("Expired.", show_alert=True)
-            return
-        if q.message.message_id != state.get("msg_id", q.message.message_id):
-            await q.answer("These buttons belong to another /font invocation.", show_alert=True)
-            return
-        # find font by id
-        fn = None
-        for _id, name, f in FONTS:
-            if _id == fid:
-                fn = f
-                break
-        if fn is None:
-            await q.answer("Font not found.", show_alert=True)
-            return
-        try:
-            styled = fn(state["text"])
-        except Exception:
-            styled = state["text"]
-        await q.message.reply_text(styled)
-        # Optionally expire token after selection so buttons can't be reused:
-        # PENDING.pop(token, None)
-        return
-
-
+    if parts[0] == "F":
+        token, fid = parts[1], parts[2]
+        text = PENDING.get(token, "")
+        fn = next(f for i, _, f in FONTS if i == fid)
+        await q.message.reply_text(fn(text))
 
 
 skip_updates = True
