@@ -616,6 +616,19 @@ def load_packs():
     else:
         user_packs = {}
 
+
+def lexica_search(query, count=5):
+    """Fallback for art/anime images using lexica.art (if Google misses)"""
+    try:
+        r = requests.get(f"https://lexica.art/api/v1/search?q={query}", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return [img["src"] for img in data.get("images", [])[:count]]
+    except Exception as e:
+        logging.warning(f"Lexica search failed: {e}")
+        return []
+
+        
 def save_packs():
     try:
         with open(PACKS_FILE, "w", encoding="utf-8") as f:
@@ -3325,6 +3338,22 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             disable_web_page_preview=True,
             disable_notification=True,
         )
+
+async def movie_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /movie <movie name>")
+        return
+
+    query = " ".join(context.args)
+    url = f"http://www.omdbapi.com/?t={query}&plot=full&apikey={OMDB_API_KEY}"
+    response = requests.get(url).json()
+
+    if response.get("Response") == "False":
+        await update.message.reply_text("❌ Movie not found.")
+        return
+
+    await send_movie_page(update, context, response)
+
 
 # ---------------- MOVIE PAGE ----------------
 async def send_movie_page(update_or_query, context, movie, edit=False):
@@ -7801,6 +7830,20 @@ async def font_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token = short_token()
     PENDING[token] = text
     await update.message.reply_text("✨ Choose a font:", reply_markup=build_keyboard(token, 0, text))
+
+async def symbol_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sends single-character symbol buttons (kept minimal)."""
+    # Minimal symbol list (separate from fonts) — user said fonts = letters, but keep useful symbols
+    symbols = ["•", "●", "○", "★", "☆", "✦", "➤", "→", "←", "↑", "↓"]
+    token = short_token()
+    PENDING[token] = {"text": "", "msg_id": update.message.message_id, "symbol": True}
+    rows = []
+    for s in symbols:
+        rows.append([InlineKeyboardButton(s, callback_data=f"S|{token}|{s}")])
+    rows.append([InlineKeyboardButton("❌ Close", callback_data=f"C|{token}")])
+    kb = InlineKeyboardMarkup(rows)
+    await update.message.reply_text("✴ Choose a symbol:", reply_markup=kb)
+
 
 async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
