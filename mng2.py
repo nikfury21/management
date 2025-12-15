@@ -2088,7 +2088,8 @@ async def get_latest_pic(client, message):
 @pyro_client.on_message(pyro_filters.command("picall"))
 async def get_all_pics(client, message):
     global sending_pics
-    if not picall_enabled.get(message.chat.id, True):
+    if not pic_enabled.get(message.chat.id, True):
+
         return
     if sending_pics:
         await message.reply_text("♦️ I'm already sending profile pictures of another user!")
@@ -8064,3 +8065,4 @@ if __name__ == "__main__":
     # 2️⃣ Use the same event loop that global clients were bound to
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bots())
+
